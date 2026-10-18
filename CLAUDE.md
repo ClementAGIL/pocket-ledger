@@ -65,6 +65,7 @@ src/components/          ui.tsx primitives (Button incl. outline + icon, Progres
   prices/                PriceRow (Update prices) · QuoteRow (Online prices)
   settings/              one component per Settings section + shared rows
 src/theme.ts             color tokens (light/dark), spacing, radius
+assets/icon-source/      SVG sources of the app icon (suit with a phone showing a rising arrow in the breast pocket); the PNGs in assets/images are rendered from them
 ```
 
 ## Data model and invariants
