@@ -33,7 +33,7 @@ export default function RootLayout() {
         colors: { ...navTheme.colors, background: theme.background, card: theme.surface, primary: theme.primary },
       }}>
       <StatusBar style="auto" />
-      <SQLiteProvider databaseName="myfinance.db" onInit={migrate}>
+      <SQLiteProvider databaseName="pocketledger.db" onInit={migrate}>
         <DataProvider onReady={hideSplash}>
           <LockGate>
             <UndoProvider>

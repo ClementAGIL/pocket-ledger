@@ -22,7 +22,7 @@ export async function exportBackup(db: SQLiteDatabase, password: string | null, 
   if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing is not available on this device.');
   const plain = serializeBackup(await loadSnapshot(db));
   const content = password ? await encryptBackup(plain, password, Crypto.getRandomBytes, { onProgress }) : plain;
-  const file = new File(Paths.cache, `my-finance-backup-${today()}${password ? '.encrypted' : ''}.json`);
+  const file = new File(Paths.cache, `pocket-ledger-backup-${today()}${password ? '.encrypted' : ''}.json`);
   if (file.exists) file.delete();
   file.create();
   file.write(content);
@@ -30,7 +30,7 @@ export async function exportBackup(db: SQLiteDatabase, password: string | null, 
     await Sharing.shareAsync(file.uri, {
       mimeType: 'application/json',
       UTI: 'public.json',
-      dialogTitle: 'Save MyFinance backup',
+      dialogTitle: 'Save Pocket Ledger backup',
     });
   } finally {
     if (file.exists) file.delete();

@@ -20,7 +20,7 @@ const MAX_N = 2 ** 20;
 export const MIN_PASSWORD_LENGTH = 8;
 
 export interface EncryptedBackupFile {
-  app: 'my-finance';
+  app: 'pocket-ledger';
   encrypted: 1;
   kdf: { name: 'scrypt'; N: number; r: number; p: number; salt: string };
   cipher: { name: 'xchacha20-poly1305'; nonce: string };
@@ -52,7 +52,7 @@ export async function encryptBackup(
   const key = await deriveKey(password, salt, kdf, options.onProgress);
   const ciphertext = xchacha20poly1305(key, nonce).encrypt(utf8Encode(plaintext));
   const file: EncryptedBackupFile = {
-    app: 'my-finance',
+    app: 'pocket-ledger',
     encrypted: 1,
     kdf: { name: 'scrypt', ...kdf, salt: base64Encode(salt) },
     cipher: { name: 'xchacha20-poly1305', nonce: base64Encode(nonce) },
@@ -64,7 +64,7 @@ export async function encryptBackup(
 export function isEncryptedBackup(text: string): boolean {
   try {
     const json = JSON.parse(text);
-    return json?.app === 'my-finance' && json?.encrypted === 1;
+    return json?.app === 'pocket-ledger' && json?.encrypted === 1;
   } catch {
     return false;
   }

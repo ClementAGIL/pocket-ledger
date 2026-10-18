@@ -1,4 +1,4 @@
-# MyFinance
+# Pocket Ledger
 
 Personal finance tracker (Expo SDK 57 / React Native). The user enters everything by hand; data lives only on the phone in SQLite. User-facing docs: `README.md`.
 
@@ -200,9 +200,10 @@ npx expo install --check   # dependency versions match the SDK
 npx expo export --platform android --output-dir <tmp>   # check the bundle builds
 ```
 
+- **Local Android build:** `npx expo run:android` only generates `android/` when it's missing. After changing `app.json` (name, icon, scheme, plugins), run `npx expo prebuild --clean --platform android` first, or the build keeps the old values.
 - Add or upgrade packages only with `npx expo install <pkg>`.
 - **Never run `npm audit fix --force`**: it installs versions incompatible with the Expo SDK and breaks the app. Most audit warnings concern dev and build tooling.
 - **ESM-only packages** (like `@noble/*`) must be added to jest `transformIgnorePatterns` in `package.json`.
 - **jest-expo replaces `fetch`** with a mock: a live check against the real sources needs its own `fetch` (e.g. built on `node:https`) passed to `runQuotes`.
 - Before saying a task is done, run the tests, typecheck and lint.
-- **Standalone Android APK:** `npx eas-cli@latest build -p android --profile preview` (EAS cloud build, `eas.json` profile `preview` = installable APK, package `com.myfinance.app`). It is a release build: `__DEV__` is false (no Development section), its database is separate from Expo Go's, and monthly reminders work on Android. The app must keep working in Expo Go too.
+- **Standalone Android APK:** `npx eas-cli@latest build -p android --profile preview` (EAS cloud build, `eas.json` profile `preview` = installable APK, package `com.pocketledger.app`). It is a release build: `__DEV__` is false (no Development section), its database is separate from Expo Go's, and monthly reminders work on Android. The app must keep working in Expo Go too.

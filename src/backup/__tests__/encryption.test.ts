@@ -35,7 +35,7 @@ describe('encoding', () => {
 });
 
 describe('encrypted backups', () => {
-  const backup = JSON.stringify({ app: 'my-finance', formatVersion: 2, data: { note: 'Épargne 2026 €' } });
+  const backup = JSON.stringify({ app: 'pocket-ledger', formatVersion: 2, data: { note: 'Épargne 2026 €' } });
 
   it('round-trips with the right password and hides the content', async () => {
     const encrypted = await encryptBackup(backup, 'correct horse battery', random, FAST);

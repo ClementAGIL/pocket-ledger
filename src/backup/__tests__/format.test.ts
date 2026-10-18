@@ -31,9 +31,9 @@ describe('backup format', () => {
     expect(() => parseBackup(JSON.stringify(noSource))).toThrow();
   });
 
-  it('rejects files that are not MyFinance backups', () => {
+  it('rejects files that are not Pocket Ledger backups', () => {
     expect(() => parseBackup('not json')).toThrow('not valid JSON');
-    expect(() => parseBackup('{"app":"other"}')).toThrow('not a MyFinance backup');
+    expect(() => parseBackup('{"app":"other"}')).toThrow('not a Pocket Ledger backup');
   });
 
   it('rejects dangling references and bad dates', () => {

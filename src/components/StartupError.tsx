@@ -15,7 +15,7 @@ export function StartupError({ error, retry }: ErrorBoundaryProps) {
   return (
     <ScrollView style={{ backgroundColor: theme.background }} contentContainerStyle={styles.content}>
       <Ionicons name="alert-circle-outline" size={48} color={theme.negative} />
-      <Text style={[styles.title, { color: theme.text }]}>MyFinance couldn’t start</Text>
+      <Text style={[styles.title, { color: theme.text }]}>Pocket Ledger couldn’t start</Text>
       <Text style={[styles.text, { color: theme.textSecondary }]}>
         Your data is still on this phone: nothing was deleted. If you just installed an older version of the app,
         install the latest one. Otherwise, try again or restart the app.

@@ -72,7 +72,7 @@ export default function PortfolioScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.topBar}>
           <Text style={[styles.appName, { color: theme.text }]} numberOfLines={1}>
-            MyFinance
+            Pocket Ledger
           </Text>
           <View style={styles.actions}>
             {hasReminders && (

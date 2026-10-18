@@ -7,7 +7,7 @@ describe('auto backup rules', () => {
     const name = backupFileName('daily', at(2026, 10, 3, 8, 5, 9));
     expect(name).toBe('2026-10-03T080509_daily.json');
     expect(parseBackupFileName(name)).toEqual({ name, date: at(2026, 10, 3, 8, 5, 9), reason: 'daily' });
-    expect(parseBackupFileName('my-finance-backup-2026-10-03.json')).toBeNull();
+    expect(parseBackupFileName('pocket-ledger-backup-2026-10-03.json')).toBeNull();
     expect(parseBackupFileName('2026-10-03T080509_unknown.json')).toBeNull();
   });
 

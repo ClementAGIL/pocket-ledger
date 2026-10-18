@@ -9,7 +9,7 @@ import { radius, space, useTheme } from '@/theme';
 /** Time in background after which the app asks to unlock again. */
 const RELOCK_AFTER_MS = 60_000;
 
-export async function authenticate(promptMessage = 'Unlock MyFinance') {
+export async function authenticate(promptMessage = 'Unlock Pocket Ledger') {
   const result = await LocalAuthentication.authenticateAsync({ promptMessage });
   return result.success;
 }
@@ -78,7 +78,7 @@ export function LockGate({ children }: { children: ReactNode }) {
       {settings.lockEnabled && (locked || covered) && (
         <View style={[StyleSheet.absoluteFill, styles.cover, { backgroundColor: theme.background }]}>
           <Ionicons name="lock-closed" size={48} color={theme.primary} />
-          <Text style={[styles.title, { color: theme.text }]}>MyFinance is locked</Text>
+          <Text style={[styles.title, { color: theme.text }]}>Pocket Ledger is locked</Text>
           {locked && !covered && (
             <Pressable
               onPress={unlock}

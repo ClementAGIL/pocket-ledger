@@ -1,4 +1,4 @@
-# MyFinance
+# Pocket Ledger
 
 A private personal finance tracker for your phone. You keep all your accounts in one place (bank accounts, stocks, ETFs, crypto, real estate, retirement plans, loans…), follow your net worth and performance over time, and plan your goals.
 

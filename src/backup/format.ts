@@ -1,7 +1,7 @@
 import { isISODate } from '@/domain/dates';
 import type { Snapshot } from '@/domain/types';
 
-const APP_ID = 'my-finance';
+const APP_ID = 'pocket-ledger';
 /** When the format changes, bump it and keep the older versions importable. */
 const FORMAT_VERSION = 8;
 const SUPPORTED_VERSIONS = [8];
@@ -45,7 +45,7 @@ export function parseBackup(text: string): Snapshot {
   } catch {
     throw new BackupError('This file is not valid JSON.');
   }
-  check(isObj(json) && json.app === APP_ID, 'not a MyFinance backup');
+  check(isObj(json) && json.app === APP_ID, 'not a Pocket Ledger backup');
   check(
     SUPPORTED_VERSIONS.includes(json.formatVersion as number),
     `unsupported format version ${String(json.formatVersion)}`,
