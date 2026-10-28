@@ -15,11 +15,12 @@ import { PeriodSelector } from '@/components/PeriodSelector';
 import { Button, Card, ModalCard, Money, Percent, Row, SectionTitle, Segmented } from '@/components/ui';
 import { formatDate } from '@/domain/format';
 import { benchmarkSeries } from '@/domain/benchmark';
-import { buildHistory, downsample, sliceHistory, type HistoryPoint } from '@/domain/history';
+import { buildHistory, downsample, moneyFlows, sliceHistory, type HistoryPoint } from '@/domain/history';
 import { PERIOD_LABELS } from '@/domain/performance';
 import { missingSetup } from '@/domain/projection';
 import { reviewsDue } from '@/domain/reviews';
 import { summarizeStaleness } from '@/domain/staleness';
+import { useDataMode } from '@/state/DataMode';
 import { useData, useToday } from '@/state/DataProvider';
 import { space, useTheme } from '@/theme';
 
@@ -35,9 +36,11 @@ export default function PortfolioScreen() {
   const rate = settings.benchmarkRate;
   const rateLabel = `${+(rate * 100).toFixed(2)}%`;
   const history = useMemo((): (HistoryPoint & { benchmark?: number })[] => {
+    // The orange line is the money put in, so dividends and gains show as the gap above it.
     const points = buildHistory(
       [...portfolio.byAssetId.values()].map((v) => ({ steps: v.steps, isLiability: v.isLiability })),
       now,
+      moneyFlows(portfolio),
     );
     if (rate <= 0) return points;
     // "What if every euro had earned the rate": recomputed from the operations, never stored.
@@ -62,6 +65,10 @@ export default function PortfolioScreen() {
   const hasReminders = staleness.stale > 0 || reviews.length > 0 || setup.length > 0;
   const [reminderOpen, setReminderOpen] = useState(false);
   const online = useOnlinePricesEntry();
+  const { isDemo, switchTo } = useDataMode();
+  // One way only from here: the way back is in Settings, behind a confirmation (no accidental reveal).
+  // No confirmation on the way in: a dialog would leave the real amounts visible behind it.
+  const showDemo = () => switchTo('demo');
   const closeAnd = (path: Parameters<typeof router.push>[0]) => {
     setReminderOpen(false);
     router.push(path);
@@ -90,6 +97,7 @@ export default function PortfolioScreen() {
               label={hidden ? 'Show amounts' : 'Hide amounts'}
               onPress={() => updateSettings({ hideAmounts: !hidden })}
             />
+            {!isDemo && <IconButton name="flask-outline" label="Show demo data" onPress={showDemo} />}
             <IconButton name="settings-outline" label="Settings" onPress={() => router.push('/settings')} />
           </View>
         </View>
@@ -134,6 +142,7 @@ export default function PortfolioScreen() {
                 points={chartPoints}
                 hidden={hidden}
                 valueLabel={showNetWorth ? 'Net worth' : 'Assets'}
+                investedLabel="Money put in"
                 benchmarkLabel={`At ${rateLabel}`}
               />
             </Card>

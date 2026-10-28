@@ -5,6 +5,7 @@ import {
   normalizeCurrency,
   parseCoinGeckoPrice,
   parseYahooChart,
+  parseYahooHistory,
   pickCoinGeckoId,
   pickYahooSymbol,
   planQuoteSave,
@@ -71,6 +72,47 @@ describe('source answers', () => {
     expect(code(() => parseYahooChart(YAHOO_NOT_FOUND, '2026-10-11'))).toBe('not-found');
     expect(code(() => parseYahooChart({ chart: { result: [{ meta: { regularMarketPrice: 0 } }] } }, '2026-10-11'))).toBe('not-found');
     expect(code(() => parseYahooChart('<html>', '2026-10-11'))).toBe('bad-data');
+  });
+
+  it('parses a monthly Yahoo history, one close per month', () => {
+    // Paris bars: 2022-01-01 00:00 CET (winter) and 2022-07-01 00:00 CEST, read with today's +1h offset.
+    const history = parseYahooHistory({
+      chart: {
+        result: [
+          {
+            meta: { symbol: 'CW8.PA', currency: 'EUR', gmtoffset: 3600 },
+            timestamp: [1640991600, 1656626400, 1659304800, 1661983200, 1661990000],
+            indicators: { quote: [{ close: [400, 380.5, null, 390, 391] }] },
+          },
+        ],
+        error: null,
+      },
+    });
+    expect(history.symbol).toBe('CW8.PA');
+    expect([...history.months]).toEqual([
+      ['2022-01', 400],
+      ['2022-07', 380.5],
+      ['2022-09', 391],
+    ]);
+    expect(() => parseYahooHistory({ chart: { result: null, error: { code: 'Not Found' } } })).toThrow(QuoteError);
+  });
+
+  it('reads the splits of a Yahoo history', () => {
+    // GOOG: 20-for-1, first trading day 2022-07-18 (09:30 New York, -4h).
+    const history = parseYahooHistory({
+      chart: {
+        result: [
+          {
+            meta: { symbol: 'GOOG', currency: 'USD', gmtoffset: -14400 },
+            timestamp: [1656648000],
+            indicators: { quote: [{ close: [116.3] }] },
+            events: { splits: { '1658151000': { date: 1658151000, numerator: 20, denominator: 1, splitRatio: '20:1' }, bad: { date: 'x' } } },
+          },
+        ],
+      },
+    });
+    expect(history.splits).toEqual([{ date: '2022-07-18', ratio: 20 }]);
+    expect(parseYahooHistory({ chart: { result: [{ timestamp: [1656648000], indicators: { quote: [{ close: [1] }] } }] } }).splits).toEqual([]);
   });
 
   it('prefers a euro listing for an ISIN', () => {

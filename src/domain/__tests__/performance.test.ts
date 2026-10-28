@@ -1,6 +1,8 @@
 import { assetPerformance, buildPerformance, combine, periodStart } from '../performance';
+import { buildHistory, moneyFlows } from '../history';
 import { buildPortfolio } from '../portfolio';
 import { computePosition, replay } from '../positions';
+import { monthlySavings } from '../savings';
 import type { PricePoint, Snapshot, Transaction, TxType } from '../types';
 
 let nextId = 1;
@@ -138,5 +140,74 @@ describe('buildPerformance', () => {
   it('combine is additive', () => {
     const a = assetPerformance('balance', [], [], '2024-01-01', '2024-06-30');
     expect(combine([a, a], false).gain).toBe(0);
+  });
+});
+
+describe('dividends paid into a cash account', () => {
+  const cat = (id: number, name: string, valuation: 'units' | 'balance') =>
+    ({ id, name, kind: 'asset', valuation, color: '#000', sortOrder: id, isDefault: true, targetWeight: null, updateReminder: 'monthly' }) as const;
+  const asset = (id: number, categoryId: number, valuation: 'units' | 'balance') =>
+    ({ id, accountId: 1, categoryId, name: `A${id}`, identifier: null, valuation, note: null, reviewDate: null, archived: false, createdAt: '' }) as const;
+  const row = (id: number, assetId: number, type: TxType, date: string, amount: number, linkedId: number | null, quantity: number | null = null): Transaction => ({
+    id,
+    assetId,
+    type,
+    date,
+    quantity,
+    unitPrice: quantity ? amount / quantity : null,
+    amount,
+    fees: 0,
+    note: null,
+    linkedId,
+  });
+  // 1000 € put into the cash account, 900 € of shares bought from it, a 20 € dividend paid into it.
+  const data: Snapshot = {
+    categories: [cat(1, 'ETF', 'units'), cat(2, 'Cash', 'balance')],
+    accounts: [{ id: 1, name: 'Broker', institution: null, note: null, archived: false, createdAt: '' }],
+    assets: [asset(1, 1, 'units'), asset(2, 2, 'balance')],
+    transactions: [
+      row(101, 2, 'DEPOSIT', '2024-01-02', 1000, null),
+      row(102, 1, 'BUY', '2024-01-03', 900, 103, 10),
+      row(103, 2, 'WITHDRAW', '2024-01-03', 900, 102),
+      row(104, 1, 'INCOME', '2024-03-01', 20, 105),
+      row(105, 2, 'DEPOSIT', '2024-03-01', 20, 104),
+    ],
+    prices: [{ id: 1, assetId: 1, date: '2024-06-30', price: 95, source: 'manual' }],
+  };
+  const portfolio = buildPortfolio(data);
+
+  it('are a gain of the stock, not money added', () => {
+    const perf = buildPerformance(portfolio, 'ALL', '2024-06-30');
+    expect(perf.total.netFlows).toBe(1000);
+    expect(perf.total.gain).toBe(70);
+    expect(perf.total.dividends).toBe(20);
+    expect(perf.total.pct).toBeCloseTo(0.07);
+    // Each account on its own: the dividend is the stock's, the cash account just received it.
+    expect(perf.byAsset.get(1)!.gain).toBe(70);
+    expect(perf.byAsset.get(2)!.gain).toBe(0);
+    // Over a period too: no money added in the first half.
+    const ytd = buildPerformance(portfolio, 'YTD', '2024-06-30');
+    expect(ytd.total.netFlows).toBe(1000);
+    // Only the 1000 € of 2 January is weighted (the buy and its cash side cancel out).
+    expect(ytd.total.weightedFlows).toBeCloseTo((1000 * 180) / 181, 5);
+  });
+
+  it('do not raise the money put in (Home chart line)', () => {
+    const points = buildHistory(
+      [...portfolio.byAssetId.values()].map((v) => ({ steps: v.steps, isLiability: v.isLiability })),
+      '2024-06-30',
+      moneyFlows(portfolio),
+    );
+    expect(points.map((p) => [p.date, p.invested])).toEqual([
+      ['2024-01-02', 1000],
+      ['2024-01-03', 1000],
+      ['2024-03-01', 1000],
+      ['2024-06-30', 1000],
+    ]);
+    expect(points[points.length - 1].value).toBe(1070);
+  });
+
+  it('are not savings', () => {
+    expect(monthlySavings(data, '2024-01', '2024-03').months.map((m) => m.net)).toEqual([1000, 0, 0]);
   });
 });

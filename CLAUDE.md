@@ -9,7 +9,7 @@ Personal finance tracker (Expo SDK 57 / React Native). The user enters everythin
 - **No network, except one opt-in, user-triggered feature: online prices.**
   - Settings › Online prices is off by default. Fetching only happens when the user presses "Fetch prices online" (no background, timer or automatic refresh), and nothing is saved before the user reviews and presses Save.
   - Only identifiers (tickers, ISINs, coin names) go to Yahoo Finance and CoinGecko, never amounts or quantities.
-  - All network code lives in `src/quotes/fetchQuotes.ts`. Otherwise: no bank/broker APIs, analytics, crash reporting, remote fonts or images.
+  - All network code lives in `src/quotes/fetchQuotes.ts` (also used by the import script for month-end prices). Otherwise: no bank/broker APIs, analytics, crash reporting, remote fonts or images.
 - **Must run in Expo Go.** Only modules bundled with Expo Go, so no SQLCipher or other custom native code. If a feature truly needs a development build, ask first. (A standalone APK is planned: it must keep working in Expo Go too.)
 - **EUR only, UI in English.** Foreign quotes are converted to EUR when fetched.
 - **Privacy:**
@@ -45,7 +45,8 @@ src/domain/              PURE TypeScript (no React/Expo imports), unit-tested in
   projection                        Goals simulation: growth, saving pace, goal / FIRE date, inflation
 src/db/                  migrations.ts (schema), repo.ts (all SQL), demo.ts (dev data),
                          nodeTestDatabase.ts (expo-sqlite stand-in on node:sqlite, tests only)
-src/state/               DataProvider (loads everything, computes, write(), settings, today), UndoProvider
+src/state/               DataMode (real / demo database, SQLiteProvider), DataProvider (loads everything, computes,
+                         write(), settings, today), UndoProvider
 src/backup/              format (plain JSON), encryption + encoding (password backups),
                          backup (export/import I/O), autoBackup + autoBackupRules (local safety net)
 src/quotes/fetchQuotes   the only network code: Yahoo (chart, ISIN search, FX) + CoinGecko
@@ -64,6 +65,8 @@ src/components/          ui.tsx primitives (Button incl. outline + icon, Progres
   asset/                 EntryLine (history line, entry order, operation labels) · EditAsset
   prices/                PriceRow (Update prices) · QuoteRow (Online prices)
   settings/              one component per Settings section + shared rows
+scripts/import/          statement → backup converter, run on a computer (npm run import): ledger (merge into a
+                         backup, replacing only the imported account), csv, one file per format (degiro, revolut)
 src/theme.ts             color tokens (light/dark), spacing, radius
 assets/icon-source/      SVG sources of the app icon (suit with a phone showing a rising arrow in the breast pocket); the PNGs in assets/images are rendered from them
 ```
@@ -86,6 +89,7 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
   - a BUY / SELL / INCOME of a `units` asset can be paid from / into an asset of the Cash category; both rows point to each other;
   - the cash side is a WITHDRAW (amount + fees) or DEPOSIT (amount − fees) on the same date (`evaluateCashLink` in `operations.ts`); low cash only warns;
   - it nets to 0 in performance, savings and the overall XIRR (both sides go through `cashFlow()`);
+  - a dividend paid into cash (INCOME ↔ DEPOSIT, `isIncomeTransfer()`) is not money added portfolio-wide: left out of the total performance flows, the Home "Money put in" line (`moneyFlows()`) and savings; per asset the cash side stays a deposit (cash gain 0, the dividend is the stock's gain);
   - keep the pair consistent with `repo.syncLinkedCash` (create / update / move / remove); delete and undo both rows together; `deleteAsset` unlinks the other side, `restoreAsset` relinks it.
 - **Money:**
   - stored as integer cents in SQLite (`amount_cents`, `fees_cents`), handled as euros in the domain;
@@ -106,7 +110,7 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
   - split into `priceGain` + `dividends` + `interest`;
   - % = Modified Dietz, or gain / net money invested for ALL;
   - "Since purchase" figures stay in `position` / `summary`.
-- **`cashFlow()` in `performance.ts`** is the single "money in/out" rule, shared by performance, savings, the benchmark and the XIRR flows.
+- **`cashFlow()` in `performance.ts`** is the single "money in/out" rule, shared by performance, savings, the benchmark, the XIRR flows and the Home chart's "Money put in" line (deposits − withdrawals, not the cost of what is held; Today › "Invested" stays the cost).
 - **Monthly savings:** assets via `cashFlow()`; debts: every change of a loan balance counts (borrow −, repay +); `chartBounds()` cuts exceptional months (`exceptionalLimit()`: > 3× the 75th percentile).
 - **Annualized return** (`returns.ts`, `useData().returns`):
   - XIRR since the start, money-weighted: buys/deposits out, sells/withdrawals/dividends in, current value at the end; debts excluded;
@@ -142,6 +146,11 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
   - each found line has a checkbox, ticked by default except unchanged prices (`samePrice`: equal at the displayed decimals), which start unticked and grayed; changes over ±30% show a "Big price change" label with a tap-to-open explanation (a warning, not an error);
   - price `source` is shown in the history ("Fetched online" / "Entered manually");
   - jest-expo mocks `fetch`: tests pass a fake `fetch` to `runQuotes`.
+- **Demo mode** (`state/DataMode.tsx`): a second database file (`pocketledger-demo.db`) for showing the app (interviews…):
+  - entered from the Home flask icon, at once (no dialog: the real amounts would show behind it; hidden in demo); the way back is only Settings › Demo data (last section) › "Back to my data", always confirmed;
+  - the mode is stored outside both databases (`expo-sqlite/kv-store`, key `dataMode`); a switch remounts everything (`key` on `SQLiteProvider`), so the lock asks again when going back;
+  - the demo database is rebuilt from `demo.ts` each time it opens; settings are per database;
+  - in demo: no automatic backups (they'd push out the real ones), Reminder and Backup sections hidden, the monthly reminder isn't touched.
 - **Notifications** are local only (no push server).
   - **Never import `expo-notifications` statically** (only `import type`): Expo Go on Android throws when loading it, which crashes the app.
   - Use `loadNotifications()`, which returns null where it's unavailable.
@@ -149,6 +158,15 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
   - **Automatic local backups** (`Documents/backups`, unencrypted, keep the last N): one before the first `write()` of the day (in `DataProvider`), plus `safetyBackup()` before any restore, reset or delete-all. Best effort: a failed backup must never block a change.
   - **Exports** can be password-encrypted: scrypt (N=2^14, about 5–10 s on a phone, on purpose) + XChaCha20-Poly1305 via `@noble/*`, pure JS. All parameters are stored in the file.
   - **Format** (`FORMAT_VERSION`): prices carry `source` and `createdAt`, transactions `linkedId` and `createdAt`; a link to a missing transaction is dropped.
+
+- **Statement import** (`scripts/import/`, not in the app):
+  - `npm run import -- <format> <csv> [--out file] [--account name] [--no-prices]` (tsx); a converter returns an `ImportedAccount` (assets + operations in EUR, `cash` = linked cash side) and warnings for every line it doesn't understand;
+  - `mergeAccount()` reads the existing `--out` (a previous run or a password-less export), replaces only the account with the same name and keeps everything else; an unreadable existing file is never overwritten;
+  - DEGIRO: trades grouped by order ID (EUR = the conversion line), foreign income pooled until its conversion and shared pro rata (cash matches to the cent), sweeps ignored, splits restated, delisting = sale at the settlement;
+  - month-end prices (unless `--no-prices`): `heldMonthEnds()` lists the months each `units` asset with an identifier was held, `fetchMonthlyHistory()` asks Yahoo for the whole monthly history (`period1=0`: `range=max` turns into quarterly bars; only identifiers sent), tries listings euro first until one goes back far enough, converts at each month's `EUR{CUR}=X` close; saved as `online` prices at the month end (today for the current month), `createdAt` 23:59:59 so they come after the day's operations;
+  - Revolut (consolidated statement, double-encoded UTF-8: match ASCII only): money put in = EUR "Change en …" / "… pocket" lines into "Revolut cash"; buys = net + fees; net dividends; crypto quantities lose their decimal point (`cryptoQuantities()` finds the decimals from the € values and scales staking to the year-end holding); Learn & Earn and staking = 0 € BUYs at the market price (staking one per coin per year); `missingSplits`: Yahoo's split events (`events=split`) restate earlier operations (`applySplits()`);
+  - `historyMatchesTrades()` drops a fetched history whose closes are > ×3 from the import's trade prices (another product); crypto assets are asked as `SYMBOL-EUR`;
+  - new format: add `<bank>.ts` + register it in `CONVERTERS` (`run.ts`) + a test with a small invented CSV.
 
 ## How to change things
 
@@ -176,7 +194,7 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
   - custom SVG (`HistoryChart` has a time-proportional x-axis; Goals reuses it with the goal as the dashed line);
   - series colors are validated palette slots (`seriesValue`, `seriesInvested`, `seriesBenchmark`, `categorical`), so don't swap them by eye;
   - at most 6 donut segments (the rest folds into "Other").
-- **Demo data** (`src/db/demo.ts`, Settings › Development, `__DEV__` only):
+- **Demo data** (`src/db/demo.ts`; demo mode in every build, Settings › Development "Reset with demo data" `__DEV__` only):
   - keep it exercising every feature: all staleness levels, due reviews, a loan last updated 4 months ago, real Yahoo tickers (CW8.PA, ESE.PA, TTE.PA, NOKIA.HE, AAPL…), a bond ISIN that isn't found, a few online prices, 3 buys paid from the checking account;
   - its prices are invented, so a real fetch shows many "Big price change" labels;
   - `demo.test.ts` checks it on real SQLite.
@@ -201,6 +219,7 @@ npx expo install --check   # dependency versions match the SDK
 npx expo export --platform android --output-dir <tmp>   # check the bundle builds
 ```
 
+- **Dev app on a phone/emulator (fast loop):** `npx expo run:android --app-id com.pocketledger.app.dev` builds the debug app, installs it and serves it with Metro. `plugins/withDevVariant.js` makes debug builds a separate app, "Dev Pocket Ledger" (`com.pocketledger.app.dev`, own data), so they never replace the release APK. Afterwards `npx expo start` + open the dev app is enough (rebuild only after native changes).
 - **Local Android build:** `npx expo run:android` only generates `android/` when it's missing. After changing `app.json` (name, icon, scheme, plugins), run `npx expo prebuild --clean --platform android` first, or the build keeps the old values.
 - Add or upgrade packages only with `npx expo install <pkg>`.
 - **Never run `npm audit fix --force`**: it installs versions incompatible with the Expo SDK and breaks the app. Most audit warnings concern dev and build tooling.

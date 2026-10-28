@@ -82,3 +82,9 @@ export function deleteLocalBackup(name: string) {
   const file = new File(folder(), name);
   if (file.exists) file.delete();
 }
+
+/** "Erase data and backups": removes every automatic backup on this phone. Exported files are elsewhere, out of reach. */
+export function deleteAllLocalBackups() {
+  const dir = folder();
+  if (dir.exists) dir.delete();
+}

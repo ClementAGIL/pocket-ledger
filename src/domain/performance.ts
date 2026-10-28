@@ -150,6 +150,16 @@ export function assetPerformance(
 }
 
 /**
+ * The cash side of a dividend paid into a cash account ("Paid into"): money that moves inside the
+ * portfolio, not money added. On its own asset it is still a deposit (the cash account's gain
+ * stays 0, the dividend is the stock's gain); portfolio-wide it is left out of the money put in
+ * (total performance, the Home "money put in" line, savings).
+ */
+export function isIncomeTransfer(tx: Transaction, txById: Map<number, Transaction>): boolean {
+  return tx.type === 'DEPOSIT' && tx.linkedId != null && txById.get(tx.linkedId)?.type === 'INCOME';
+}
+
+/**
  * Money put into (+) or taken out of (−) an asset by a transaction. Income is not a flow.
  * Shared by period performance and monthly savings so both agree on "money added".
  */
@@ -187,10 +197,23 @@ export function buildPerformance(portfolio: Portfolio, period: Period, today: IS
     byCategory.set(g.category.id, combine(g.items.map((v) => byAsset.get(v.asset.id)!), sinceStart));
   }
 
-  const total = combine(
-    [...portfolio.byAssetId.values()].filter((v) => !v.isLiability).map((v) => byAsset.get(v.asset.id)!),
-    sinceStart,
-  );
+  const assets = [...portfolio.byAssetId.values()].filter((v) => !v.isLiability);
+  const sum = combine(assets.map((v) => byAsset.get(v.asset.id)!), sinceStart);
+  // Dividends paid into a cash account stay in the portfolio: not money added for the whole
+  // (the gain is the same, the money added and the % base are not inflated by them).
+  const startDay = start ? dayNumber(start) : 0;
+  const span = dayNumber(today) - startDay;
+  for (const v of assets) {
+    if (v.asset.valuation !== 'balance') continue;
+    for (const tx of portfolio.txByAsset.get(v.asset.id) ?? []) {
+      if ((start && tx.date < start) || tx.date > today || !isIncomeTransfer(tx, portfolio.txById)) continue;
+      const flow = cashFlow('balance', tx);
+      sum.netFlows -= flow;
+      sum.inflows -= flow;
+      if (start) sum.weightedFlows -= flow * (span > 0 ? (dayNumber(today) - dayNumber(tx.date)) / span : 0);
+    }
+  }
+  const total = withPct(sum, sinceStart);
 
   return { period, start, total, byCategory, byAsset };
 }

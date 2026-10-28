@@ -1,5 +1,5 @@
 import { addMonths } from './dates';
-import { cashFlow } from './performance';
+import { cashFlow, isIncomeTransfer } from './performance';
 import { replay } from './positions';
 import type { Snapshot } from './types';
 
@@ -37,7 +37,8 @@ export const monthOf = (date: string): Month => date.slice(0, 7);
  * - assets: money put in minus money taken out (same rule as "money added" in performance);
  * - debts: every change of the balance is money, borrowing counts negative and repaying positive
  *   (a home bought 245k with a 196k loan is a 49k saving; each principal payment is a saving).
- * Dividends and interest are returns, not savings: they are not counted.
+ * Dividends and interest are returns, not savings: they are not counted (nor the cash side of a
+ * dividend paid into a cash account).
  */
 export function monthlySavings(data: Snapshot, from: Month, to: Month): SavingsSummary {
   const liabilityCategories = new Set(data.categories.filter((c) => c.kind === 'liability').map((c) => c.id));
@@ -48,10 +49,13 @@ export function monthlySavings(data: Snapshot, from: Month, to: Month): SavingsS
   }
 
   const assets = new Map(data.assets.map((a) => [a.id, a]));
+  const txById = new Map(data.transactions.map((t) => [t.id, t]));
   for (const tx of data.transactions) {
     const asset = assets.get(tx.assetId);
     const bucket = asset && byMonth.get(monthOf(tx.date));
     if (!asset || !bucket || liabilityCategories.has(asset.categoryId)) continue;
+    // A dividend paid into a cash account is a return, like any dividend.
+    if (isIncomeTransfer(tx, txById)) continue;
     const flow = cashFlow(asset.valuation, tx);
     if (flow > 0) bucket.added += flow;
     else bucket.withdrawn -= flow;

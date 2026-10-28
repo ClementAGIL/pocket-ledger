@@ -1,3 +1,5 @@
+import { cashFlow, isIncomeTransfer } from './performance';
+import type { Portfolio } from './portfolio';
 import type { PositionState } from './positions';
 import type { ISODate } from './types';
 
@@ -5,6 +7,7 @@ export interface HistoryPoint {
   date: ISODate;
   /** Total value of assets (liabilities excluded). */
   value: number;
+  /** Cost of what is held (sum of the states), or the money put in so far when `flows` are given. */
   invested: number;
   liabilities: number;
 }
@@ -18,7 +21,7 @@ export interface HistorySeries {
  * Portfolio value over time: at every date where something happened, each asset contributes its
  * latest known state. `end` (usually today) adds a final point so the line reaches the present.
  */
-export function buildHistory(series: HistorySeries[], end?: ISODate): HistoryPoint[] {
+export function buildHistory(series: HistorySeries[], end?: ISODate, flows?: MoneyFlow[]): HistoryPoint[] {
   const dates = new Set<ISODate>();
   for (const s of series) for (const step of s.steps) if (step.lastDate) dates.add(step.lastDate);
   if (dates.size === 0) return [];
@@ -27,6 +30,8 @@ export function buildHistory(series: HistorySeries[], end?: ISODate): HistoryPoi
 
   const cursors = series.map(() => -1);
   const points: HistoryPoint[] = [];
+  let flowIndex = 0;
+  let putIn = 0;
   for (const date of sortedDates) {
     let value = 0;
     let invested = 0;
@@ -41,9 +46,37 @@ export function buildHistory(series: HistorySeries[], end?: ISODate): HistoryPoi
         invested += state.invested;
       }
     });
+    if (flows) {
+      while (flowIndex < flows.length && flows[flowIndex].date <= date) putIn += flows[flowIndex++].amount;
+      invested = putIn;
+    }
     points.push({ date, value, invested, liabilities });
   }
   return points;
+}
+
+export interface MoneyFlow {
+  date: ISODate;
+  amount: number;
+}
+
+/**
+ * Money put into the assets (+) or taken out (−), by date: the same rule as performance's "money
+ * added" (`cashFlow`), debts left out. Buys paid from a tracked cash account net to 0, and
+ * dividends paid into one are not money put in (`isIncomeTransfer`), so the line only moves when
+ * money really comes in or goes out.
+ */
+export function moneyFlows(portfolio: Portfolio): MoneyFlow[] {
+  const byDate = new Map<ISODate, number>();
+  for (const v of portfolio.byAssetId.values()) {
+    if (v.isLiability) continue;
+    for (const tx of portfolio.txByAsset.get(v.asset.id) ?? []) {
+      if (isIncomeTransfer(tx, portfolio.txById)) continue;
+      const flow = cashFlow(v.asset.valuation, tx);
+      if (flow !== 0) byDate.set(tx.date, (byDate.get(tx.date) ?? 0) + flow);
+    }
+  }
+  return [...byDate].map(([date, amount]) => ({ date, amount })).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
 /** Keeps the first point at or after `from`, preceded by the state carried into the range. */

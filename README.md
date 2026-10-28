@@ -25,7 +25,7 @@ Built with Expo (SDK 57) and React Native; it runs in **Expo Go**.
 - **Goals card:** progress towards your goal (or FIRE number) and your emergency fund ("Covered · 112%"). Tap a line to open Insights › Goals or Savings.
 - **Period selector** (Month · Year · 12M · All). It applies across the whole app.
 - **History chart:**
-  - *Net worth* view (when you have debts), or *Investments* view: asset value vs money invested;
+  - *Net worth* view (when you have debts), or *Investments* view: asset value vs **money put in** (deposits minus withdrawals: it only moves when money comes in or goes out, so dividends, even paid into a cash account, and gains show as the gap above it);
   - an optional dashed **"what if" line**: where your money would be at 4%/yr (or 2–7%), to check whether you beat a savings account or a bond.
 - **Performance card:** value at the start of the period, money added, value today, and a **gain breakdown**: price gains · dividends · interest.
 - **Today card:** assets, invested, unrealized and realized gains, debts, your **real annualized return** since the start (e.g. "▲ 7.4%/yr vs 4%"), and how far ahead or behind the comparison rate you are.
@@ -160,7 +160,31 @@ npx expo start
 Scan the QR code with Expo Go (Android) or the Camera app (iPhone).
 
 ### Try it with demo data
-In development, **Settings → Development → Reset with demo data** fills the app with about 5 years of realistic history across every feature (including real tickers for online prices, and buys paid from a cash account). Its prices are invented, so fetching real prices shows many "Big price change" labels. **Delete all data** empties it again.
+To show the app without showing your own data (in an interview, for example), tap the **flask icon** on the Home screen. It switches at once (no dialog, so your amounts never stay on screen behind one) to a separate sample portfolio; your data is kept apart and isn't changed. The icon disappears while the demo is open: go back with **Settings → Demo data → Back to my data** (confirmed, and the lock asks again if it's on). The demo is rebuilt fresh each time it opens.
+
+In development, **Settings → Development → Reset with demo data** fills the app with about 5 years of realistic history across every feature (including real tickers for online prices, and buys paid from a cash account). Its prices are invented, so fetching real prices shows many "Big price change" labels.
+
+### Import your history from a broker statement
+A script on your computer (not in the app) turns a statement into a backup file, to load with **Settings → Backup → Restore from a file**:
+
+```bash
+npm run import -- degiro "Account.csv" --out my-import.json
+npm run import -- revolut "consolidated-statement.csv" --out my-import.json
+```
+
+- **Formats:** `degiro` (DEGIRO *Account* statement, CSV, French), `revolut` (Revolut *consolidated statement*, CSV, French). Each bank has its own CSV, so each gets its own converter in `scripts/import/`.
+- **One file for all your accounts:** run the command once per statement with the same `--out`. The file is merged, never overwritten: only the imported account (`DEGIRO`, or `--account "name"`) is replaced, so importing the same or a newer statement again updates it, and every other account is kept. `--out` can also be a backup exported from the app **without a password**: export, run the imports on it, restore.
+- **What you get:** one investment per ISIN, buys and sells in the euros really paid (with fees), dividends net of tax in the euros received, deposits, interest and fees on a "DEGIRO cash" account, which pays the buys (linked like "Paid from"). Splits restate the earlier quantities; delistings become a sale at the cash settlement.
+- **Revolut:** stocks like DEGIRO (buys and net dividends through a "Revolut cash" account; the money put in is the euros changed into dollars). Revolut's statement leaves stock splits out, so they're taken from Yahoo with the prices (without prices, check split stocks by hand). Crypto received for free (Learn & Earn, staking) is a 0 € buy at the market price, so it counts as a gain, not as money put in; staking is summed into **one entry per coin and year**, and the quantities are matched to the holdings at the end of the statement. The investment account's cash isn't in the statement: its balance is an estimate to check. Sales and commodities aren't handled yet (listed as warnings).
+- **Month-end prices:** so the chart follows the market between your operations (instead of a flat line and a jump at the next price update), the script adds each investment's closing price at the end of every month you held it, from Yahoo Finance (the euro listing when there is one, converted to euros otherwise). Only the ISINs, Yahoo symbols and coin symbols (`DOT-EUR`) are sent: the whole history is asked for and the months are picked on your computer, so no dates, quantities or amounts leave it. Delisted shares have no history (a warning says so). Add `--no-prices` to send nothing at all.
+- **Check the summary it prints** (quantities, invested, income, the cash balance) against your broker, and read its warnings: lines it doesn't understand are listed, never silently dropped.
+- Restoring **replaces the data in the app** (a safety backup is made first). With `--no-prices`, fetch or enter today's prices afterwards.
+- Keep these files private: they hold your whole history. `pocket-ledger-import.json` (the default output) is git-ignored.
+
+### Start over
+**Settings → Data → Delete all data** empties the app (accounts, investments, operations, prices; settings are kept), after a confirmation. A backup is saved first when automatic backups are on, and backups and exported files are never deleted, so they can still be restored from **Settings → Backup**. An **Undo** banner also appears for a few seconds.
+
+**Settings → Data → Erase data and backups** also deletes every automatic backup on this phone. It can't be undone: a large warning lists what goes, and you must type `DELETE` to confirm. Only backup files you exported and saved elsewhere survive it.
 
 ## Limitations
 
@@ -168,11 +192,11 @@ In development, **Settings → Development → Reset with demo data** fills the 
 - **Prices are entered manually,** unless you turn on Online prices. Those use free, unofficial sources (Yahoo Finance, CoinGecko) that may change or limit requests; individual bonds are rarely found.
 - **Monthly reminders don't work in Expo Go on Android.** Expo Go blocks the notifications module there. They work on iPhone, and on Android in a standalone build.
 - **The database on the phone isn't encrypted.** The lock screen protects access to the app.
-- **CSV import isn't available yet** (planned).
+- **No CSV import in the app.** Broker statements are converted on a computer (see *Import your history*), DEGIRO and Revolut for now.
 
 ## Roadmap
 - **A standalone Android APK** (EAS Build), to use the app without Expo Go and the development server.
-- CSV import.
+- More statement formats for the import script.
 
 ## Development
 

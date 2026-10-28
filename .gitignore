@@ -60,3 +60,10 @@ desktop.ini
 
 # personal notes
 PROJECT-IDEA.txt
+
+# Imported statements and generated backups (personal data)
+pocket-ledger-import.json
+*.import.json
+my-import.json
+*-import.json
+/*.csv

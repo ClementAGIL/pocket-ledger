@@ -43,7 +43,8 @@
       ],
       "expo-sqlite",
       "expo-sharing",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "./plugins/withDevVariant"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -11,6 +11,8 @@ import { parseProjectionSettings, type ProjectionSettings } from '@/domain/proje
 import { buildReturns, type PortfolioReturns } from '@/domain/returns';
 import type { ISODate, Snapshot } from '@/domain/types';
 
+import { useDataMode } from './DataMode';
+
 export interface Settings {
   hideAmounts: boolean;
   lockEnabled: boolean;
@@ -83,6 +85,7 @@ const serializeSetting = (value: Settings[keyof Settings]) =>
 
 export function DataProvider({ children, onReady }: { children: ReactNode; onReady?: () => void }) {
   const db = useSQLiteContext();
+  const { isDemo } = useDataMode();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState<Error | null>(null);
@@ -105,12 +108,13 @@ export function DataProvider({ children, onReady }: { children: ReactNode; onRea
       try {
         const [s, raw] = await Promise.all([repo.loadSnapshot(db), repo.loadSettings(db)]);
         setSnapshot(s);
-        setSettings(parseSettings(raw));
+        // Demo data is rebuilt on each opening: no automatic backups, which would also push the real ones out.
+        setSettings({ ...parseSettings(raw), ...(isDemo && { autoBackupEnabled: false }) });
       } catch (e) {
         setLoadError(e instanceof Error ? e : new Error(String(e)));
       }
     })();
-  }, [db]);
+  }, [db, isDemo]);
 
   const ready = snapshot !== null && settings !== null;
   useEffect(() => {

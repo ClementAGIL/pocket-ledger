@@ -1,6 +1,6 @@
 import type { QuoteCandidate } from '@/domain/quotes';
 
-import { runQuotes, type QuoteState } from '../fetchQuotes';
+import { fetchMonthlyHistory, runQuotes, type QuoteState } from '../fetchQuotes';
 
 const chart = (symbol: string, price: number, currency: string) => ({
   chart: { result: [{ meta: { symbol, currency, regularMarketPrice: price, regularMarketTime: 1791576001, gmtoffset: -14400 } }], error: null },
@@ -98,5 +98,54 @@ describe('runQuotes', () => {
     const { states, calls } = await run([candidate(1, 'ticker', 'GOOG')], [['chart/GOOG', 200, chart('GOOG', 1, 'EUR')]], controller.signal);
     expect(calls).toEqual([]);
     expect(states.size).toBe(0);
+  });
+});
+
+describe('fetchMonthlyHistory', () => {
+  const monthly = (symbol: string, currency: string, closes: number[]) => ({
+    // 2022-01-01, 2022-02-01, 2022-03-01 (00:00 UTC)
+    chart: { result: [{ meta: { symbol, currency, gmtoffset: 0 }, timestamp: [1640995200, 1643673600, 1646092800].slice(0, closes.length), indicators: { quote: [{ close: closes }] } }], error: null },
+  });
+
+  it('finds the listing of an ISIN and converts each month at the rate of that month', async () => {
+    const { impl, calls } = fakeFetch([
+      ['search?q=US64110L1061', 200, { quotes: [{ symbol: 'NFLX', exchange: 'NMS', quoteType: 'EQUITY' }] }],
+      ['chart/NFLX', 200, monthly('NFLX', 'USD', [100, 120, 130])],
+      ['chart/EURUSD%3DX', 200, monthly('EURUSD=X', 'USD', [1.25, 1.5])],
+    ]);
+    const history = await fetchMonthlyHistory('US64110L1061', { fetch: impl });
+    expect(history.symbol).toBe('NFLX');
+    // March has no rate: left out rather than guessed.
+    expect([...history.months]).toEqual([
+      ['2022-01', 80],
+      ['2022-02', 80],
+    ]);
+    // Only the identifier leaves the computer: no dates, quantities or amounts.
+    expect(calls.map((u) => u.replace(/^https:\/\/query1\.finance\.yahoo\.com/, ''))).toEqual([
+      '/v1/finance/search?q=US64110L1061&quotesCount=10&newsCount=0',
+      '/v8/finance/chart/NFLX?period1=0&period2=9999999999&interval=1mo&events=split',
+      '/v8/finance/chart/EURUSD%3DX?period1=0&period2=9999999999&interval=1mo&events=split',
+    ]);
+  });
+
+  it('takes the next listing when the euro one starts too late', async () => {
+    const { impl } = fakeFetch([
+      ['search?q=US22041X1028', 200, { quotes: [{ symbol: 'CRSR', exchange: 'NMS', quoteType: 'EQUITY' }, { symbol: 'CRSR.SG', exchange: 'STU', quoteType: 'EQUITY' }] }],
+      // Stuttgart listing: only from March 2022.
+      ['chart/CRSR.SG', 200, { chart: { result: [{ meta: { symbol: 'CRSR.SG', currency: 'EUR' }, timestamp: [1646092800], indicators: { quote: [{ close: [9] }] } }] } }],
+      ['chart/CRSR?', 200, monthly('CRSR', 'USD', [10, 12])],
+      ['chart/EURUSD%3DX', 200, monthly('EURUSD=X', 'USD', [1.25, 1.5])],
+    ]);
+    const history = await fetchMonthlyHistory('US22041X1028', { from: '2022-01', fetch: impl });
+    expect(history.symbol).toBe('CRSR');
+    expect([...history.months]).toEqual([
+      ['2022-01', 8],
+      ['2022-02', 8],
+    ]);
+  });
+
+  it('reports an unknown symbol', async () => {
+    const { impl } = fakeFetch([['chart/NOPE', 404, { chart: { result: null, error: { code: 'Not Found' } } }]]);
+    await expect(fetchMonthlyHistory('NOPE', { fetch: impl })).rejects.toMatchObject({ code: 'not-found' });
   });
 });

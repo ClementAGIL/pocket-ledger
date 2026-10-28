@@ -129,21 +129,77 @@ export function parseYahooChart(json: unknown, today: ISODate): RawQuote {
   };
 }
 
+export interface RawHistory {
+  symbol: string;
+  currency: string;
+  /** Close of each month ('YYYY-MM'), split-adjusted, in the listing's currency. */
+  months: Map<string, number>;
+  /** Stock splits (first day at the new price, local to the exchange), oldest first: 20 for 20-for-1. */
+  splits: { date: ISODate; ratio: number }[];
+}
+
+/**
+ * Yahoo `v8/finance/chart/{symbol}?period1=0&period2=…&interval=1mo` answer. Bars start on the 1st of the
+ * month (exchange time); half a day is added so a summer-time offset can't move one to the
+ * previous month. The current month can appear twice (partial bar + latest quote): the last wins.
+ */
+export function parseYahooHistory(json: unknown): RawHistory {
+  const chart = isRecord(json) && isRecord(json.chart) ? json.chart : null;
+  if (!chart) throw new QuoteError('bad-data');
+  const result = Array.isArray(chart.result) ? chart.result[0] : null;
+  if (!isRecord(result)) throw new QuoteError(chart.error ? 'not-found' : 'bad-data');
+  const meta = isRecord(result.meta) ? result.meta : {};
+  const offset = typeof meta.gmtoffset === 'number' ? meta.gmtoffset : 0;
+  const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
+  const indicators = isRecord(result.indicators) && Array.isArray(result.indicators.quote) ? result.indicators.quote[0] : null;
+  const closes = isRecord(indicators) && Array.isArray(indicators.close) ? indicators.close : [];
+  // Midday at the exchange, read in UTC: the exchange's calendar day.
+  const day = (t: number): ISODate => {
+    const d = new Date((t + offset + 43_200) * 1000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  };
+  const months = new Map<string, number>();
+  timestamps.forEach((t, i) => {
+    const close = closes[i];
+    if (typeof t !== 'number' || typeof close !== 'number' || !(close > 0)) return;
+    months.set(day(t).slice(0, 7), close);
+  });
+  if (months.size === 0) throw new QuoteError('not-found');
+  const events = isRecord(result.events) && isRecord(result.events.splits) ? Object.values(result.events.splits) : [];
+  const splits = events
+    .flatMap((e) =>
+      isRecord(e) && typeof e.date === 'number' && typeof e.numerator === 'number' && typeof e.denominator === 'number' && e.numerator > 0 && e.denominator > 0
+        ? [{ date: day(e.date), ratio: e.numerator / e.denominator }]
+        : [],
+    )
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  return {
+    symbol: typeof meta.symbol === 'string' ? meta.symbol : '',
+    currency: typeof meta.currency === 'string' ? meta.currency : 'EUR',
+    months,
+    splits,
+  };
+}
+
 /** Euro-area exchanges, preferred when an ISIN is listed in several places. */
 const EURO_EXCHANGES = new Set(['PAR', 'AMS', 'GER', 'FRA', 'MIL', 'MCE', 'BRU', 'LIS', 'VIE', 'HEL', 'ISE', 'DUS', 'MUN', 'STU', 'HAM', 'BER', 'EBS']);
 const EURO_SUFFIXES = ['.PA', '.AS', '.DE', '.F', '.MI', '.MC', '.BR', '.LS', '.VI', '.HE', '.IR'];
 const SEARCH_TYPES = new Set(['EQUITY', 'ETF', 'MUTUALFUND', 'INDEX', 'CURRENCY', 'FUTURE', 'CRYPTOCURRENCY']);
 
-/** Yahoo `v1/finance/search` answer for an ISIN: the symbol to quote, a euro listing if there is one. */
-export function pickYahooSymbol(json: unknown): string {
+/** Yahoo `v1/finance/search` answer for an ISIN: its listings, euro ones first, then Yahoo's order. */
+export function rankYahooSymbols(json: unknown): string[] {
   const quotes = isRecord(json) && Array.isArray(json.quotes) ? json.quotes.filter(isRecord) : [];
   const usable = quotes.filter((q) => typeof q.symbol === 'string' && (!q.quoteType || SEARCH_TYPES.has(String(q.quoteType))));
-  const euro = usable.find(
-    (q) => EURO_EXCHANGES.has(String(q.exchange)) || EURO_SUFFIXES.some((s) => String(q.symbol).endsWith(s)),
-  );
-  const pick = euro ?? usable[0];
+  const isEuro = (q: Record<string, unknown>) => EURO_EXCHANGES.has(String(q.exchange)) || EURO_SUFFIXES.some((s) => String(q.symbol).endsWith(s));
+  return [...usable.filter(isEuro), ...usable.filter((q) => !isEuro(q))].map((q) => String(q.symbol));
+}
+
+/** The symbol to quote for an ISIN: a euro listing if there is one. */
+export function pickYahooSymbol(json: unknown): string {
+  const pick = rankYahooSymbols(json)[0];
   if (!pick) throw new QuoteError('not-found');
-  return String(pick.symbol);
+  return pick;
 }
 
 /**

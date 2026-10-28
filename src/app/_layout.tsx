@@ -1,14 +1,13 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { SQLiteProvider } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from 'react-native';
 
 import { StartupError } from '@/components/StartupError';
-import { migrate } from '@/db/migrations';
 import { NotificationsBridge } from '@/notifications/NotificationsBridge';
 import { configureNotifications } from '@/notifications/reminders';
 import { LockGate } from '@/security/LockGate';
+import { DataModeProvider } from '@/state/DataMode';
 import { DataProvider } from '@/state/DataProvider';
 import { UndoProvider } from '@/state/UndoProvider';
 import { useTheme } from '@/theme';
@@ -33,7 +32,7 @@ export default function RootLayout() {
         colors: { ...navTheme.colors, background: theme.background, card: theme.surface, primary: theme.primary },
       }}>
       <StatusBar style="auto" />
-      <SQLiteProvider databaseName="pocketledger.db" onInit={migrate}>
+      <DataModeProvider>
         <DataProvider onReady={hideSplash}>
           <LockGate>
             <UndoProvider>
@@ -52,7 +51,7 @@ export default function RootLayout() {
             <NotificationsBridge />
           </LockGate>
         </DataProvider>
-      </SQLiteProvider>
+      </DataModeProvider>
     </ThemeProvider>
   );
 }
