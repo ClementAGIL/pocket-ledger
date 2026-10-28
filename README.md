@@ -36,12 +36,13 @@ Built with Expo (SDK 57) and React Native; it runs in **Expo Go**.
 
 ### Investments
 - **List view:**
-  - grouped by category (Cash, Stock, ETF, Crypto, Real estate, Bonds, Funds, Retirement, Precious metals, Other, Loan, plus your own);
+  - grouped by category (Cash, Stock, ETF, Crypto, Real estate, Bonds, Funds, Retirement, Precious metals, Other, Loan, plus your own), or **by account**: each account opens into its categories, then its investments;
   - **sortable** by value, invested, gain € or gain %;
   - each line shows its account, quantity × price, average cost and period gain;
+  - **the same product in several accounts is one line** (same identifier, e.g. the ISIN, in the same category): "Intel · 2 accounts · 80.9 · avg 41 €", with summed value and gains. The arrow shows the line of each account; tapping the line opens a combined page (one chart, summed position and annualized return, one history with the account of each entry). The By account view keeps them apart;
   - badges show **outdated prices** (gray 1 month · yellow 2–3 · orange 4–6 · red 6+) and **reviews due**;
   - each category sets how often to remind you: **monthly**, **yearly** (e.g. a retirement plan) or **never** (real estate, by default).
-- **Allocation view:** donut chart by category, account or investment, with the full table underneath.
+- **Allocation view:** donut chart by category, account or investment (up to 8 segments + "Other"; the same product in several accounts counts once), with the full table underneath.
 - **Update prices** (header link).
 
 ### Insights
@@ -60,8 +61,10 @@ Three sections, switched at the top.
 
 **Targets**
 - Set target weights by category (e.g. 70% ETF / 20% cash / 10% crypto) and see each category's current share vs its target.
+- **Use my current allocation** fills the targets with today's shares (rounded to 0.1%, adding up to 100%) for you to adjust; **Current** does the same while editing. Investments › Allocation › Category links here.
 - **Invest new money:** what to buy next, without selling. **Full rebalance:** the exact buy and sell amounts.
 - Categories without a target (e.g. your home) are left out.
+- A category you don't hold yet (gold, bonds, real estate…) can have a target too: **Categories you don't hold yet** in the editor lists them, **New category** creates one. It then shows at 0% with what to buy.
 - While editing, the **Cash** row suggests a target from your emergency fund (e.g. 6 months of expenses ≈ 9%), with a one-tap "Use 9%".
 
 **Goals** (a simulation)
@@ -105,11 +108,13 @@ Three sections, switched at the top.
   - a progress bar and one line per investment: gray while waiting, ✓ green when found (old price struck through → new price, with the change), ⚠ red with the reason when it fails (unknown ticker, no connection…);
   - prices in dollars, pounds or pence are converted to euros with the day's exchange rate;
   - each found price has a **checkbox**; an **unchanged** price starts unticked and grayed;
+  - the free sources limit requests, so a price **fetched less than an hour ago** isn't asked again: one already saved shows "up to date" (with **Fetch again** if you want it anyway), one found but not saved comes back as it was, with how long ago it was fetched (Fetch again asks it anew). A product held in several accounts is asked only once. All the coins are asked from CoinGecko in a single request; if CoinGecko refuses, Yahoo is tried for each coin;
   - a big change (over 30%) shows a ⚠ **Big price change** label; tap it to see why: normal if your last price is old, otherwise check the identifier;
   - **nothing is saved until you press Save**, and you can Undo right after. Prices are saved at today's date (the market close date is shown).
 
 ### Investment page
 - **Chart, position details, period gain**, and its **annualized return** (after one year of history).
+- **Buys, sells and dividends on the chart:** ▲ money in (buy, deposit, borrow), ▼ money out (sell, withdrawal, repayment), ● dividend or interest, in a strip under the chart; nearby ones are drawn as a bigger mark. Touch the chart to see the operations of that day ("Buy · 2.5 · 430 € · 12 Mar 2024"); amounts stay hidden when "hide amounts" is on.
 - **Notes:** why you bought it, your plan.
 - **Review date** (in 3 months, 6 months, 1 year…), with a one-tap "Reviewed: next in 6 months".
 - **Full history,** newest first, in the order you entered things. Each price shows whether it was **entered manually** or **fetched online**; linked entries show "⇄ Paid from Livret A". Tap an entry to edit it, or use the trash icon to delete it (with Undo).

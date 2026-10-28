@@ -5,7 +5,7 @@ import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native
 
 import { AnnualizedReturn } from '@/components/AnnualizedReturn';
 import { EditAsset } from '@/components/asset/EditAsset';
-import { EntryLine, newestFirst, txLabel, type Entry } from '@/components/asset/EntryLine';
+import { EntryLine, newestFirst, type Entry } from '@/components/asset/EntryLine';
 import { HistoryChart } from '@/components/HistoryChart';
 import { NotesCard } from '@/components/NotesCard';
 import { PeriodSelector } from '@/components/PeriodSelector';
@@ -13,10 +13,10 @@ import { StalenessBadge } from '@/components/StalenessBadge';
 import { Button, Card, Money, Percent, Row, SectionTitle, TextLink } from '@/components/ui';
 import * as repo from '@/db/repo';
 import { formatDate, formatNumber } from '@/domain/format';
-import { downsample, sliceHistory } from '@/domain/history';
+import { chartMarks, downsample, sliceHistory } from '@/domain/history';
 import { PERIOD_LABELS } from '@/domain/performance';
 import { isReviewDue } from '@/domain/reviews';
-import type { Transaction } from '@/domain/types';
+import { useEntryActions } from '@/hooks/useEntryActions';
 import { useMoney } from '@/hooks/useMoney';
 import { useData, useToday } from '@/state/DataProvider';
 import { useUndo } from '@/state/UndoProvider';
@@ -28,17 +28,11 @@ export default function AssetScreen() {
   const now = useToday();
   const { portfolio, performance, returns, write } = useData();
   const { money, hidden } = useMoney();
-  /** "Paid from Livret A" / "Linked to MSCI World" for the two sides of a cash transfer. */
-  const linkLabel = (tx: Transaction) => {
-    const other = tx.linkedId != null ? portfolio.txById.get(tx.linkedId) : undefined;
-    const name = other && portfolio.byAssetId.get(other.assetId)?.asset.name;
-    if (!other || !name) return null;
-    if (tx.type === 'BUY') return `Paid from ${name}`;
-    if (tx.type === 'SELL' || tx.type === 'INCOME') return `Paid into ${name}`;
-    return `Linked to ${name}`;
-  };
+  const { linkLabel, openEntry, deleteEntry } = useEntryActions();
   const showUndo = useUndo();
   const [editing, setEditing] = useState(false);
+  // Price updates crowd out buys, sells and dividends: hidden each time the page opens (not saved).
+  const [showPrices, setShowPrices] = useState(false);
   const view = portfolio.byAssetId.get(Number(id));
 
   if (!view) {
@@ -62,6 +56,7 @@ export default function AssetScreen() {
   const chartPoints = downsample(sliceHistory(allPoints, performance.start));
 
   const assetTxs = portfolio.txByAsset.get(asset.id) ?? [];
+  const marks = chartMarks(assetTxs, performance.start);
   const assetPrices = portfolio.pricesByAsset.get(asset.id) ?? [];
   // Newest first, in the order they were saved (same order as the calculations).
   // Rendered by a FlatList: only visible rows are drawn, even with years of daily entries.
@@ -69,30 +64,8 @@ export default function AssetScreen() {
     ...assetTxs.map((tx) => ({ kind: 'tx' as const, date: tx.date, tx })),
     ...assetPrices.map((price) => ({ kind: 'price' as const, date: price.date, price })),
   ].sort(newestFirst);
-
-  // An entry is deleted right away: the "Undo" banner replaces a confirmation.
-  const deleteEntry = async (entry: Entry) => {
-    if (entry.kind === 'tx') {
-      const { tx } = entry;
-      // A cash transfer goes as a pair: the buy and the withdrawal that paid it.
-      const linked = tx.linkedId != null ? portfolio.txById.get(tx.linkedId) : undefined;
-      const pair = linked ? [tx, linked] : [tx];
-      await write(async (txn) => {
-        for (const t of pair) await repo.deleteTransaction(txn, t.id);
-      });
-      const label = txLabel(tx.type, isLiability);
-      const otherName = linked && portfolio.byAssetId.get(linked.assetId)?.asset.name;
-      showUndo(`${label} of ${formatDate(tx.date)}${otherName ? ` and its ${otherName} entry` : ''} deleted`, () =>
-        write(async (txn) => {
-          for (const t of pair) await repo.restoreTransaction(txn, t);
-        }),
-      );
-    } else {
-      const { price } = entry;
-      await write((txn) => repo.deletePrice(txn, price.id));
-      showUndo(`Update of ${formatDate(price.date)} deleted`, () => write((txn) => repo.restorePrice(txn, price)));
-    }
-  };
+  const shownEntries = showPrices ? entries : entries.filter((e) => e.kind === 'tx');
+  const updatesLabel = asset.valuation === 'units' ? 'price updates' : isLiability ? 'balance updates' : 'value updates';
 
   // A whole investment is still confirmed first, then can be undone too.
   const deleteAsset = () =>
@@ -112,12 +85,6 @@ export default function AssetScreen() {
       },
     ]);
 
-  const openEntry = (entry: Entry) =>
-    router.push({
-      pathname: '/operation',
-      params: entry.kind === 'tx' ? { txId: String(entry.tx.id) } : { priceId: String(entry.price.id) },
-    });
-
   return (
     <>
       <Stack.Screen
@@ -131,7 +98,7 @@ export default function AssetScreen() {
       <FlatList
         style={{ backgroundColor: theme.background }}
         contentContainerStyle={styles.content}
-        data={editing ? [] : entries}
+        data={editing ? [] : shownEntries}
         keyExtractor={(entry) => `${entry.kind}-${entry.kind === 'tx' ? entry.tx.id : entry.price.id}`}
         initialNumToRender={20}
         windowSize={7}
@@ -173,7 +140,13 @@ export default function AssetScreen() {
                 />
 
                 <Card style={{ marginTop: space.lg }}>
-                  <HistoryChart points={chartPoints} hidden={hidden} valueLabel={isLiability ? 'Debt' : 'Value'} />
+                  <HistoryChart
+                    points={chartPoints}
+                    hidden={hidden}
+                    valueLabel={isLiability ? 'Debt' : 'Value'}
+                    marks={marks}
+                    isLiability={isLiability}
+                  />
                 </Card>
 
                 <SectionTitle>Position</SectionTitle>
@@ -221,7 +194,17 @@ export default function AssetScreen() {
                 <SectionTitle>Notes</SectionTitle>
                 <NotesCard key={`${asset.id}-${asset.note}-${asset.reviewDate}`} asset={asset} />
 
-                <SectionTitle>History</SectionTitle>
+                <View style={styles.historyTitle}>
+                  <SectionTitle>History</SectionTitle>
+                  {assetPrices.length > 0 && (
+                    <TextLink
+                      title={showPrices ? `Hide ${updatesLabel}` : `Show ${updatesLabel} (${assetPrices.length})`}
+                      icon={showPrices ? 'eye-off-outline' : 'eye-outline'}
+                      onPress={() => setShowPrices((s) => !s)}
+                      style={{ alignSelf: 'flex-end', marginBottom: space.sm }}
+                    />
+                  )}
+                </View>
               </>
             )}
           </>
@@ -229,7 +212,9 @@ export default function AssetScreen() {
         ListEmptyComponent={
           editing ? null : (
             <Card>
-              <Text style={{ color: theme.textMuted }}>No operations yet.</Text>
+              <Text style={{ color: theme.textMuted }}>
+                {entries.length > 0 ? `No operations yet: only ${updatesLabel}.` : 'No operations yet.'}
+              </Text>
             </Card>
           )
         }
@@ -243,7 +228,7 @@ export default function AssetScreen() {
               styles.entry,
               { backgroundColor: theme.surface, borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
               index === 0 && styles.entryFirst,
-              index === entries.length - 1 && styles.entryLast,
+              index === shownEntries.length - 1 && styles.entryLast,
             ]}>
             <EntryLine
               entry={entry}
@@ -265,6 +250,7 @@ const styles = StyleSheet.create({
   content: { padding: space.lg, paddingBottom: space.xl * 3 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   hero: { fontSize: 32, fontWeight: '700', marginTop: space.xs },
+  historyTitle: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   dueBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: space.sm },
   entry: {
     flexDirection: 'row',

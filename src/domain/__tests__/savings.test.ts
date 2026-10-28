@@ -74,6 +74,16 @@ describe('monthlySavings', () => {
     expect(monthlySavings(home, '2024-05', '2024-05').months[0].net).toBe(49000);
   });
 
+  it('leaves buys paid from cash out of both lines', () => {
+    const buy = { ...tx(1, 'BUY', '2024-05-03', 300, 0.5), linkedId: 1001 };
+    const cash = { ...tx(2, 'WITHDRAW', '2024-05-03', 300.5), id: 1001, linkedId: buy.id };
+    const sell = { ...tx(1, 'SELL', '2024-05-20', 100, 1), linkedId: 1002 };
+    const cashIn = { ...tx(2, 'DEPOSIT', '2024-05-20', 99), id: 1002, linkedId: sell.id };
+    const month = monthlySavings({ ...data, transactions: [tx(2, 'DEPOSIT', '2024-05-02', 3000), buy, cash, sell, cashIn], prices: [] }, '2024-05', '2024-05')
+      .months[0];
+    expect([month.added, month.withdrawn, month.net]).toEqual([3000, 0, 3000]);
+  });
+
   it('crosses year boundaries and finds the first month', () => {
     expect(monthlySavings(data, '2023-11', '2024-01').months.map((m) => [m.month, m.net])).toEqual([
       ['2023-11', 0],

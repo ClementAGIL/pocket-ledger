@@ -24,8 +24,8 @@ export default function FetchPricesScreen() {
   const showUndo = useUndo();
 
   // Frozen when the screen opens: saving refreshes the portfolio, the list must not change.
-  const [candidates] = useState(() => quoteCandidates(portfolio));
-  const { states, excluded, running, found, failed, done, toSave, notFound, unchangedCount, cancel, retry, toggle, tickAll } =
+  const [candidates] = useState(() => quoteCandidates(portfolio, Date.now()));
+  const { states, excluded, running, found, failed, recent, reused, done, toSave, notFound, unchangedCount, cancel, retry, toggle, tickAll } =
     useQuoteRun(candidates, settings.onlinePricesEnabled);
   const [saving, setSaving] = useState(false);
 
@@ -86,9 +86,14 @@ export default function FetchPricesScreen() {
               <Text style={{ color: theme.text, fontWeight: '600', flex: 1 }}>
                 {running
                   ? `Fetching… ${done} of ${candidates.length}`
-                  : `${found.length} found${unchangedCount ? ` (${unchangedCount} unchanged)` : ''}${failed.length ? ` · ${failed.length} failed` : ''}${
-                      done < candidates.length ? ` · ${candidates.length - done} not fetched` : ''
-                    }`}
+                  : [
+                      found.length || !recent.length ? `${found.length} found${unchangedCount ? ` (${unchangedCount} unchanged)` : ''}` : null,
+                      recent.length ? `${recent.length} up to date` : null,
+                      failed.length ? `${failed.length} failed` : null,
+                      done < candidates.length ? `${candidates.length - done} not fetched` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
               </Text>
               {running ? (
                 <TextLink title="Cancel" onPress={cancel} />
@@ -97,6 +102,14 @@ export default function FetchPricesScreen() {
               ) : null}
             </View>
             <ProgressBar progress={candidates.length ? done / candidates.length : 0} height={6} />
+            {!running && recent.length + reused.length > 0 && (
+              <View style={styles.headerLine}>
+                <Text style={{ color: theme.textMuted, fontSize: 12, flex: 1 }}>
+                  Prices fetched less than an hour ago are not asked again: the sources limit the requests.
+                </Text>
+                <TextLink title="Fetch again" size={13} onPress={() => retry([...recent, ...reused])} />
+              </View>
+            )}
             {!running && found.length > 0 && (
               <View style={styles.headerLine}>
                 <Text style={{ color: theme.textMuted, fontSize: 12, flex: 1 }}>

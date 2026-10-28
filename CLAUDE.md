@@ -22,11 +22,13 @@ Personal finance tracker (Expo SDK 57 / React Native). The user enters everythin
 src/app/                 Expo Router screens only (their sub-components live in src/components)
   (tabs)/index           Portfolio (home): net worth, period gain, GoalsCard, chart, performance, today;
                          header: reminders, online prices (sync icon), hide amounts, settings
-  (tabs)/investments     List (sortable, by category) | Allocation donut
+  (tabs)/investments     List (sortable; by category, or by account → categories → investments) | Allocation donut
   (tabs)/insights        Sections (switch at the top): Savings (+ emergency fund) | Targets | Goals;
                          opened on a section with ?section=savings|targets|goals&at=<timestamp> (&focus=emergency scrolls to the fund)
   (tabs)/add             Operation form (components/operation/OperationForm)
-  asset/[id]             Investment page: chart, position, notes & review, history (FlatList)
+  holding                Same product in several accounts (?holding=<holdingKey>): summed chart & position,
+                         merged history with an account tag, links to each investment page
+  asset/[id]             Investment page: chart, position, notes & review, history (FlatList; price updates hidden until "Show", not saved)
   operation              Modal: add/edit an entry (editing the cash side of a transfer opens the main side)
   update-prices          Bulk price/balance entry + "Fetch prices online" button
   fetch-prices           Modal: online fetch with progress, old → new review, Save + Undo
@@ -38,7 +40,8 @@ src/domain/              PURE TypeScript (no React/Expo imports), unit-tested in
   benchmark, savings, allocation    "what if X%" line, monthly savings, donut data
   staleness, reviews, priceUpdates  update reminders, review dates, bulk price parsing
   repayments, sorting, rebalance    loan repayment planning, list sort, target allocation plan
-  returns                           real annualized return (XIRR), overall and per investment
+  returns                           real annualized return (XIRR), overall, per investment, per holding (forAssets)
+  holdings                          same identifier + category in several accounts: holdingKey, mergeRows, sums
   operations                        Add-operation rules: offered ops, validation, records, preview, cash link
   quotes                            online prices: candidates, identifiers, source parsing, EUR conversion
   emergency                         emergency fund, cash advice, goal progress
@@ -53,7 +56,8 @@ src/quotes/fetchQuotes   the only network code: Yahoo (chart, ISIN search, FX) +
 src/notifications/       reminders (lazy expo-notifications), NotificationsBridge (sync + tap)
 src/security/LockGate    biometric/PIN lock + app-switcher cover
 src/hooks/               useMoney (€ + hide amounts), useNumberDraft (typed number inputs),
-                         useConfirmLeave (discard unsaved changes?), useQuoteRun (online fetch session);
+                         useConfirmLeave (discard unsaved changes?), useQuoteRun (online fetch session),
+                         useEntryActions (history line: open, delete + undo, cash link label);
                          useOnlinePricesEntry lives in OnlinePricesIntro
 src/components/          ui.tsx primitives (Button incl. outline + icon, ProgressBar, Chips…), charts
                          (HistoryChart, SavingsChart, AllocationCard), GoalsCard, MonthlySavings, EmergencyFund,
@@ -61,7 +65,7 @@ src/components/          ui.tsx primitives (Button incl. outline + icon, Progres
   goals/                 GoalCard · ProjectionCard · GrowthCard · SavingCard (Simulation holds the state)
   operation/             OperationForm (state + save) · NewAssetFields · OperationFields · Preview
   home/                  HeaderButtons (reminder, icon buttons) · Reminders (prices to update, reviews due)
-  investments/           CategoryGroup (category card + its investment rows)
+  investments/           CategoryGroup (category card + its investment rows; `nested` inside an account) · AccountGroup
   asset/                 EntryLine (history line, entry order, operation labels) · EditAsset
   prices/                PriceRow (Update prices) · QuoteRow (Online prices)
   settings/              one component per Settings section + shared rows
@@ -80,6 +84,7 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
   - On a loan, DEPOSIT = Borrow and WITHDRAW = Repay.
 - **Never store derived numbers** (totals, invested, average cost, history, benchmark…). Everything is recomputed from transactions and prices in `src/domain`, so back-dated entries correct everything automatically.
 - **Calculation rules:** see the comments in `src/domain/positions.ts`. Change them only together with their tests.
+- **Charges** (exchange connection fees, negative interest): an INCOME of 0 € with the cost as `fees` (`isCharge()` in `positions.ts`): it lowers the value and the gain; shown as "Fee −2,50 €" in the history.
 - **Order of entries** (`compareEntries` in `positions.ts`, shared by the calculations and the investment history):
   - by date, then by save time (`createdAt`, `'YYYY-MM-DD HH:MM:SS'` UTC), then operations before prices, then id;
   - so the latest entry of a day sets the price (a buy after a price update, or the other way round);
@@ -108,18 +113,24 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
 - **Gains follow one app-wide period** (`settings.period`: MTD / YTD / 12M / ALL, via `<PeriodSelector>`, default ALL). Screens show `useData().performance`:
   - gain = end − start − net money added + dividends paid out;
   - split into `priceGain` + `dividends` + `interest`;
+  - `byAccount`: an account's assets; a dividend paid into a cash asset of the same account isn't money added to it (like the total);
   - % = Modified Dietz, or gain / net money invested for ALL;
   - "Since purchase" figures stay in `position` / `summary`.
 - **`cashFlow()` in `performance.ts`** is the single "money in/out" rule, shared by performance, savings, the benchmark, the XIRR flows and the Home chart's "Money put in" line (deposits − withdrawals, not the cost of what is held; Today › "Invested" stays the cost).
-- **Monthly savings:** assets via `cashFlow()`; debts: every change of a loan balance counts (borrow −, repay +); `chartBounds()` cuts exceptional months (`exceptionalLimit()`: > 3× the 75th percentile).
+- **Monthly savings:** assets via `cashFlow()`, both sides of a linked cash transfer left out (a buy paid from cash is neither "invested" nor "withdrawn"; the net is unchanged); debts: every change of a loan balance counts (borrow −, repay +); `chartBounds()` cuts exceptional months (`exceptionalLimit()`: > 3× the 75th percentile).
 - **Annualized return** (`returns.ts`, `useData().returns`):
   - XIRR since the start, money-weighted: buys/deposits out, sells/withdrawals/dividends in, current value at the end; debts excluded;
   - shown only after 1 year of history;
-  - `total` is computed after each change, `forAsset(id)` on demand and cached.
+  - `total` is computed after each change, `forAsset(id)` on demand and cached; `forAssets(ids)` (a holding) on demand, not cached.
+- **Holdings** (`holdings.ts`): `units` investments with the same identifier (case and spaces ignored) in the same category are one product held in several accounts.
+  - display only (no table, no setting): Investments › List › By category shows one `HoldingRow` (`mergeRows` + `sortRows` on the summed figures; chevron = per-account lines; "N accounts" counts distinct accounts, `accountsLabel()`); By account never merges;
+  - `sumStates()`: quantities, values, costs, realized and income summed, price = the most recently known; avg cost = invested / quantity; period gain = `combine()` of the investments (`holdingPerformance`);
+  - `/holding` page: `buildHistory` over the investments' steps, chart marks of all of them, history with each entry's account; editing, notes, reviews and deleting stay on each investment page.
+- **Chart marks** (`chartMarks()` in `history.ts`, `HistoryChart` `marks` prop): one mark per day and operation type (summed across investments; income net of fees, charges left out), ▲ in (BUY / DEPOSIT) · ▼ out (SELL / WITHDRAW) · ● INCOME, one lane per kind under the chart, marks within 10 px drawn as one bigger mark; while scrubbing, the legend lists the operations since the previous point (amounts via `formatEuro(…, { hidden })`). Colors `positive` / `negative` / `categorical[3]`, always with the shape.
 - **Comparison line** (`benchmark.ts`, `settings.benchmarkRate`, 0 = off): flows compounded at X%/yr, dividends leave it. Computed in one pass; never stored.
 - **Update reminders:** based on `position.priceDate` (last price, trade or balance change; dividends don't count); levels in the category's period: 1 gray · 2–3 yellow · 4–6 orange · 6+ red; `never` is never late; `theme.stale*` colors always paired with an icon + label; closed and archived positions are ignored.
 - **Reviews:** due on and after `reviewDate` (`reviews.ts`); shown in the list, the home reminder and the investment page.
-- **Target allocation** (`rebalance.ts`): only categories with a target take part, targets must sum to 100%; "buy-only" splits new money over the deficits, "full" gives exact buys/sells; rounded to the cent, keeping the exact total. `TargetAllocation` accepts `investAmount` (pre-filled) and `startEditing`.
+- **Target allocation** (`rebalance.ts`): only categories with a target take part, targets must sum to 100%; "buy-only" splits new money over the deficits, "full" gives exact buys/sells; rounded to the cent, keeping the exact total. `TargetAllocation` accepts `investAmount` (pre-filled) and `startEditing`; "Use my current allocation" / "Current" pre-fill the editor with `currentShares()` (one decimal, sums to 100, a share rounding to 0 stays without a target, nothing saved before Save). Investments › Allocation › Category links to Insights › Targets. The editor lists every asset category: held or targeted ones first, the others ("not held yet") on demand; a target on an empty category takes part like any other (0% now). Order: the targets list by share now, then target (`byShareThenTarget`; "Next: buy" stays the biggest buy); the editor by target, then value (`byTargetThenValue`), fixed when it opens.
 - **Loan "Repay by new balance":** `planRepayments()` splits the principal equally over monthly payment dates; the last payment absorbs the rounding.
 - **Add form** (`operations.ts` + `OperationForm`):
   - Buy / Sell start from the asset's last unit price;
@@ -140,8 +151,10 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
 - **Online prices** (`quotes.ts`, `fetchQuotes.ts`, `app/fetch-prices.tsx`):
   - entry points: Home sync icon and the Update prices button; when off, both open `OnlinePricesIntro` (explains, "Turn on and fetch"); consent text shared via `ONLINE_PRICES_PRIVACY`;
   - candidates: open, non-archived, `units` assets (not debts) with an identifier;
-  - identifier: category named like "Crypto" → CoinGecko (symbol, id or name; falls back to Yahoo `SYM-EUR`); a valid ISIN → Yahoo search (euro listing preferred) then chart; anything else → Yahoo ticker (`GOOG`, `IWDA.AS`, `GC=F`);
+  - identifier: category named like "Crypto" → CoinGecko, all coins of a run in one `simple/price` request (`isCoinSymbol`: ≤ 5 chars by `symbols=`, names by `ids=`, never a name by symbol: "bitcoin" is a tiny token's symbol); a coin missing → Yahoo `SYM-EUR`, then CoinGecko search only if the batch answered (never one CoinGecko request per coin after a 429); a valid ISIN → Yahoo search (euro listing preferred) then chart; anything else → Yahoo ticker (`GOOG`, `IWDA.AS`, `GC=F`);
   - non-EUR quotes: minor units first (GBp ÷ 100), then ÷ Yahoo `EUR{CUR}=X`, once per currency per run; 3 requests at a time, 10 s timeout;
+  - each identifier is asked once per run (`quoteKey`: kind + query, coins case-insensitive): the same product in several accounts shares the request and its answer; still one line, checkbox and saved price per investment;
+  - not fetched again within `REFETCH_AFTER_MINUTES` (60): a current price saved online in that time (`recentOnlineFetch` → `fetchedMinutesAgo`, status `recent`, "Fetch again" link), or a price found this app session (`sessionFound` in `useQuoteRun`, by `quoteKey`, even unsaved: shown again as found with its age, `minutesAgo`, and asked again by "Fetch again"); a batch CoinGecko request refused or failed (`ctx.coinFailure`) means no per-coin search for the rest of the run; Retry fetches only failed / not fetched lines;
   - saved **at today's date** with `upsertPrice(…, source: 'online')` (the market day is only shown); undo deletes new rows and restores replaced ones (`planQuoteSave`);
   - each found line has a checkbox, ticked by default except unchanged prices (`samePrice`: equal at the displayed decimals), which start unticked and grayed; changes over ±30% show a "Big price change" label with a tap-to-open explanation (a warning, not an error);
   - price `source` is shown in the history ("Fetched online" / "Entered manually");
@@ -193,7 +206,7 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
 - **Charts:**
   - custom SVG (`HistoryChart` has a time-proportional x-axis; Goals reuses it with the goal as the dashed line);
   - series colors are validated palette slots (`seriesValue`, `seriesInvested`, `seriesBenchmark`, `categorical`), so don't swap them by eye;
-  - at most 6 donut segments (the rest folds into "Other").
+  - at most 9 donut segments (`MAX_SLICES`: up to 8 items each get a validated `categorical` slot; from 9, the 7 largest + "Other"; never a 9th hue); by investment, a holding in several accounts is one segment.
 - **Demo data** (`src/db/demo.ts`; demo mode in every build, Settings › Development "Reset with demo data" `__DEV__` only):
   - keep it exercising every feature: all staleness levels, due reviews, a loan last updated 4 months ago, real Yahoo tickers (CW8.PA, ESE.PA, TTE.PA, NOKIA.HE, AAPL…), a bond ISIN that isn't found, a few online prices, 3 buys paid from the checking account;
   - its prices are invented, so a real fetch shows many "Big price change" labels;

@@ -1,8 +1,9 @@
 import { assetPerformance, buildPerformance, combine, periodStart } from '../performance';
 import { buildHistory, moneyFlows } from '../history';
-import { buildPortfolio } from '../portfolio';
+import { buildPortfolio, groupByAccount } from '../portfolio';
 import { computePosition, replay } from '../positions';
 import { monthlySavings } from '../savings';
+import { sortAccounts } from '../sorting';
 import type { PricePoint, Snapshot, Transaction, TxType } from '../types';
 
 let nextId = 1;
@@ -192,6 +193,22 @@ describe('dividends paid into a cash account', () => {
     expect(ytd.total.weightedFlows).toBeCloseTo((1000 * 180) / 181, 5);
   });
 
+  it('stay inside the account when the cash is in the same account', () => {
+    const perf = buildPerformance(portfolio, 'ALL', '2024-06-30');
+    expect(perf.byAccount.get(1)!.netFlows).toBe(1000);
+    expect(perf.byAccount.get(1)!.gain).toBe(70);
+    // Paid into another account's cash: money leaving the broker, arriving at the bank.
+    const twoAccounts = buildPortfolio({
+      ...data,
+      accounts: [...data.accounts, { id: 2, name: 'Bank', institution: null, note: null, archived: false, createdAt: '' }],
+      assets: [data.assets[0], { ...data.assets[1], accountId: 2 }],
+    });
+    const split = buildPerformance(twoAccounts, 'ALL', '2024-06-30');
+    expect(split.byAccount.get(1)!.gain).toBe(70);
+    expect(split.byAccount.get(2)!.netFlows).toBe(1000 - 900 + 20);
+    expect(split.total.netFlows).toBe(1000);
+  });
+
   it('do not raise the money put in (Home chart line)', () => {
     const points = buildHistory(
       [...portfolio.byAssetId.values()].map((v) => ({ steps: v.steps, isLiability: v.isLiability })),
@@ -209,5 +226,51 @@ describe('dividends paid into a cash account', () => {
 
   it('are not savings', () => {
     expect(monthlySavings(data, '2024-01', '2024-03').months.map((m) => m.net)).toEqual([1000, 0, 0]);
+  });
+});
+
+describe('groupByAccount', () => {
+  const cat = (id: number, name: string, kind: 'asset' | 'liability' = 'asset') =>
+    ({ id, name, kind, valuation: 'balance', color: '#000', sortOrder: id, isDefault: true, targetWeight: null, updateReminder: 'monthly' }) as const;
+  const account = (id: number, name: string) => ({ id, name, institution: null, note: null, archived: false, createdAt: '' });
+  const asset = (id: number, accountId: number, categoryId: number) =>
+    ({ id, accountId, categoryId, name: `A${id}`, identifier: null, valuation: 'balance', note: null, reviewDate: null, archived: false, createdAt: '' }) as const;
+  const data: Snapshot = {
+    categories: [cat(1, 'Cash'), cat(2, 'Stock'), cat(3, 'Loan', 'liability')],
+    accounts: [account(1, 'Bank'), account(2, 'Broker')],
+    assets: [asset(1, 1, 1), asset(2, 2, 1), asset(3, 2, 2), asset(4, 1, 3)],
+    transactions: [],
+    prices: [
+      { id: 1, assetId: 1, date: '2024-01-01', price: 100, source: 'manual' },
+      { id: 2, assetId: 2, date: '2024-01-01', price: 50, source: 'manual' },
+      { id: 3, assetId: 3, date: '2024-01-01', price: 850, source: 'manual' },
+      { id: 4, assetId: 4, date: '2024-01-01', price: 300, source: 'manual' },
+    ],
+  };
+  const portfolio = buildPortfolio(data);
+  const accounts = groupByAccount(portfolio.groups, portfolio.summary.assetsValue);
+
+  it('regroups the categories by account, with shares of the account and of all assets', () => {
+    const broker = accounts.find((a) => a.account.name === 'Broker')!;
+    expect(broker.value).toBe(900);
+    expect(broker.weight).toBeCloseTo(0.9);
+    // Same order as the category list (largest first).
+    expect(broker.groups.map((g) => [g.category.name, g.value, g.weight])).toEqual([
+      ['Stock', 850, 850 / 900],
+      ['Cash', 50, 50 / 900],
+    ]);
+    const bank = accounts.find((a) => a.account.name === 'Bank')!;
+    expect([bank.value, bank.debts, bank.count]).toEqual([100, 300, 2]);
+    // Debts last, with no share.
+    expect(bank.groups.map((g) => [g.category.name, g.weight])).toEqual([
+      ['Cash', 1],
+      ['Loan', 0],
+    ]);
+  });
+
+  it('sorts accounts by net value', () => {
+    const perf = buildPerformance(portfolio, 'ALL', '2024-01-01');
+    expect(sortAccounts(accounts, 'value', 'desc', perf).map((a) => a.account.name)).toEqual(['Broker', 'Bank']);
+    expect(sortAccounts(accounts, 'value', 'asc', perf).map((a) => a.account.name)).toEqual(['Bank', 'Broker']);
   });
 });

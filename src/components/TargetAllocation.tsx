@@ -1,10 +1,11 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import * as repo from '@/db/repo';
 import { emergencyFund, emergencyShare, isCashCategory } from '@/domain/emergency';
 import { formatPercent, parseNumber } from '@/domain/format';
-import { planRebalance, type RebalanceInput, type RebalanceMode, type RebalanceRow } from '@/domain/rebalance';
+import { byShareThenTarget, byTargetThenValue, currentShares, planRebalance, type RebalanceInput, type RebalanceMode, type RebalanceRow } from '@/domain/rebalance';
 import { useMoney } from '@/hooks/useMoney';
 import { useNumberDraft } from '@/hooks/useNumberDraft';
 import { useData } from '@/state/DataProvider';
@@ -22,20 +23,30 @@ export function TargetAllocation({ investAmount, startEditing = false }: { inves
   const { money } = useMoney();
   // Opened from the emergency fund ("Adjust my Cash target"): straight into the editor.
   const [editing, setEditing] = useState(startEditing);
+  // "Use my current allocation": the editor opens pre-filled with today's shares (saved only on Save).
+  const [fromCurrent, setFromCurrent] = useState(false);
   const [mode, setMode] = useState<RebalanceMode>('buy-only');
   // Opened from the emergency fund with extra cash: that amount is pre-filled.
   const amount = useNumberDraft(investAmount ?? 0);
 
   // Every asset category that holds something or has a target.
   const values = new Map(portfolio.groups.map((g) => [g.category.id, g.value]));
-  const inputs: RebalanceInput[] = snapshot.categories
-    .filter((c) => c.kind === 'asset' && ((values.get(c.id) ?? 0) > 0 || c.targetWeight !== null))
+  const all: RebalanceInput[] = snapshot.categories
+    .filter((c) => c.kind === 'asset')
     .map((c) => ({ categoryId: c.id, name: c.name, color: c.color, value: values.get(c.id) ?? 0, target: c.targetWeight }));
+  const inputs = all.filter((i) => i.value > 0 || i.target !== null);
 
   const hasTargets = inputs.some((i) => i.target !== null);
   if (editing || !hasTargets) {
     return editing ? (
-      <TargetEditor inputs={inputs} onDone={() => setEditing(false)} />
+      <TargetEditor
+        inputs={all}
+        fromCurrent={fromCurrent}
+        onDone={() => {
+          setEditing(false);
+          setFromCurrent(false);
+        }}
+      />
     ) : (
       <Card style={{ gap: space.md }}>
         <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>Set your target allocation</Text>
@@ -44,12 +55,24 @@ export function TargetAllocation({ investAmount, startEditing = false }: { inves
           today and what to buy next to get back on target.
         </Text>
         <Button title="Set targets" onPress={() => setEditing(true)} />
+        {inputs.some((i) => i.value > 0) && (
+          <Button
+            title="Use my current allocation"
+            variant="secondary"
+            onPress={() => {
+              setFromCurrent(true);
+              setEditing(true);
+            }}
+          />
+        )}
       </Card>
     );
   }
 
   const plan = planRebalance(inputs, amount.value, mode);
+  // The plan puts the biggest buy first; the list is shown by share now, then target.
   const next = plan.rows.find((r) => r.action > 0.005);
+  const rows = [...plan.rows].sort(byShareThenTarget);
 
   return (
     <View style={{ gap: space.md }}>
@@ -83,8 +106,8 @@ export function TargetAllocation({ investAmount, startEditing = false }: { inves
       </Card>
 
       <Card style={{ paddingVertical: space.xs }}>
-        {plan.rows.map((row, i) => (
-          <TargetRow key={row.categoryId} row={row} last={i === plan.rows.length - 1} />
+        {rows.map((row, i) => (
+          <TargetRow key={row.categoryId} row={row} last={i === rows.length - 1} />
         ))}
       </Card>
 
@@ -138,13 +161,20 @@ function TargetRow({ row, last }: { row: RebalanceRow; last: boolean }) {
   );
 }
 
-function TargetEditor({ inputs, onDone }: { inputs: RebalanceInput[]; onDone: () => void }) {
+const pctDrafts = (inputs: RebalanceInput[], shares: Map<number, number>): Record<number, string> =>
+  Object.fromEntries(inputs.map((i) => [i.categoryId, shares.has(i.categoryId) ? String(shares.get(i.categoryId)) : '']));
+
+function TargetEditor({ inputs, fromCurrent, onDone }: { inputs: RebalanceInput[]; fromCurrent: boolean; onDone: () => void }) {
   const theme = useTheme();
   const { write, settings } = useData();
   const { money } = useMoney({ rounded: true });
   const { yearlySpending, emergencyMonths } = settings.projection;
+  // Categories not held yet (gold, bonds…) can get a target too: listed on demand, to keep the editor short.
+  const [showAll, setShowAll] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, string>>(() =>
-    Object.fromEntries(inputs.map((i) => [i.categoryId, i.target === null ? '' : String(Math.round(i.target * 1000) / 10)])),
+    fromCurrent
+      ? pctDrafts(inputs, currentShares(inputs))
+      : Object.fromEntries(inputs.map((i) => [i.categoryId, i.target === null ? '' : String(Math.round(i.target * 1000) / 10)])),
   );
 
   const parsed = inputs.map((i) => ({ id: i.categoryId, raw: drafts[i.categoryId] ?? '', value: parseNumber(drafts[i.categoryId] ?? '') }));
@@ -161,6 +191,17 @@ function TargetEditor({ inputs, onDone }: { inputs: RebalanceInput[]; onDone: ()
     .reduce((t, i) => t + i.value, 0);
   const share = fund ? emergencyShare(fund.target, rebalanced) : null;
   const suggested = share === null ? null : Math.round(share * 1000) / 10;
+
+  // Order set when the editor opens (by target, then value), so rows don't jump while typing.
+  const [order] = useState(() =>
+    inputs
+      .map((i) => ({ ...i, target: parseNumber(drafts[i.categoryId] ?? '') }))
+      .sort(byTargetThenValue)
+      .map((i) => i.categoryId),
+  );
+  const rank = new Map(order.map((id, k) => [id, k]));
+  const shown = [...inputs].sort((a, b) => (rank.get(a.categoryId) ?? 0) - (rank.get(b.categoryId) ?? 0)).filter((i) => showAll || i.value > 0 || i.target !== null || (drafts[i.categoryId] ?? '').trim() !== '');
+  const notHeld = inputs.length - shown.length;
 
   const save = async () => {
     await write((txn) => repo.setCategoryTargets(txn, new Map(filled.map((p) => [p.id, p.value! / 100]))));
@@ -180,13 +221,14 @@ function TargetEditor({ inputs, onDone }: { inputs: RebalanceInput[]; onDone: ()
     <Card style={{ gap: space.sm }}>
       <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>Target allocation</Text>
       <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 18 }}>
-        Leave a category empty to keep it out of rebalancing (e.g. your home). Targets must add up to 100%.
+        Leave a category empty to keep it out of rebalancing (e.g. your home). A category you don’t hold yet can have a target too. Targets must add up to 100%.
       </Text>
-      {inputs.map((i) => (
+      {shown.map((i) => (
         <View key={i.categoryId} style={[styles.editRow, { borderColor: theme.border }]}>
           <View style={[styles.dot, { backgroundColor: i.color }]} />
           <Text style={{ color: theme.text, flex: 1 }} numberOfLines={1}>
             {i.name}
+            {i.value <= 0 && <Text style={{ color: theme.textMuted, fontSize: 12 }}> · not held yet</Text>}
           </Text>
           <Input
             value={drafts[i.categoryId] ?? ''}
@@ -198,6 +240,14 @@ function TargetEditor({ inputs, onDone }: { inputs: RebalanceInput[]; onDone: ()
           <Text style={{ color: theme.textSecondary, width: 16 }}>%</Text>
         </View>
       ))}
+      <View style={styles.moreRow}>
+        {notHeld > 0 ? (
+          <TextLink title={`Categories you don't hold yet (${notHeld})`} icon="add-circle-outline" onPress={() => setShowAll(true)} />
+        ) : (
+          <View />
+        )}
+        <TextLink title="New category" role="link" chevron onPress={() => router.push('/categories')} />
+      </View>
       {cash && (
         <View style={[styles.advice, { backgroundColor: theme.surfaceAlt }]}>
           <Text style={{ color: theme.text, fontSize: 13, fontWeight: '600' }}>Cash: your emergency fund</Text>
@@ -227,7 +277,10 @@ function TargetEditor({ inputs, onDone }: { inputs: RebalanceInput[]; onDone: ()
           Total {Math.round(sum * 10) / 10}%{filled.length > 0 && !canSave && !invalid ? ' — must be 100%' : ''}
           {invalid ? ' — each target must be between 0 and 100' : ''}
         </Text>
-        <TextLink title="Equal split" onPress={splitEvenly} />
+        <View style={{ flexDirection: 'row', gap: space.md }}>
+          <TextLink title="Current" onPress={() => setDrafts(pctDrafts(inputs, currentShares(inputs)))} />
+          <TextLink title="Equal split" onPress={splitEvenly} />
+        </View>
       </View>
       <View style={styles.buttons}>
         <Button title="Save targets" onPress={save} disabled={!canSave} style={{ flex: 1 }} />
@@ -247,6 +300,7 @@ const styles = StyleSheet.create({
   editRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 52, borderBottomWidth: StyleSheet.hairlineWidth },
   pctInput: { width: 76, textAlign: 'right', minHeight: 40 },
   advice: { borderRadius: 12, padding: space.md, gap: 6, marginTop: space.md },
+  moreRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: space.sm, marginTop: space.sm, flexWrap: 'wrap' },
   sumRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: space.sm },
   buttons: { flexDirection: 'row', gap: space.sm, marginTop: space.md },
 });

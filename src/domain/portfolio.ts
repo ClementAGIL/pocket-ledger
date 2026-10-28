@@ -25,6 +25,20 @@ export interface CategoryGroup {
   weight: number;
 }
 
+/** An account and what it holds, by category (Investments › List › By account). */
+export interface AccountGroup {
+  account: Account;
+  /** Its categories, each with `weight` = share of the account's assets. */
+  groups: CategoryGroup[];
+  /** Assets only. */
+  value: number;
+  debts: number;
+  invested: number;
+  /** Share of all the assets. */
+  weight: number;
+  count: number;
+}
+
 export interface PortfolioSummary {
   /** Sum of asset values (liabilities excluded). */
   assetsValue: number;
@@ -148,4 +162,49 @@ export function buildPortfolio(data: Snapshot): Portfolio {
 
   const txById = new Map(data.transactions.map((t) => [t.id, t]));
   return { summary, groups, byAssetId: new Map(views.map((v) => [v.asset.id, v])), txByAsset, pricesByAsset, txById };
+}
+
+/**
+ * Regroups category groups by account, keeping the order they come in (categories and their
+ * investments), so a sorted list stays sorted. Accounts come in the order of their first category.
+ */
+export function groupByAccount(groups: CategoryGroup[], assetsValue: number): AccountGroup[] {
+  const accounts = new Map<number, { account: Account; groups: Map<number, AssetView[]> }>();
+  for (const g of groups) {
+    for (const v of g.items) {
+      let entry = accounts.get(v.account.id);
+      if (!entry) accounts.set(v.account.id, (entry = { account: v.account, groups: new Map() }));
+      if (!entry.groups.has(g.category.id)) entry.groups.set(g.category.id, []);
+      entry.groups.get(g.category.id)!.push(v);
+    }
+  }
+  return [...accounts.values()].map(({ account, groups: byCategory }) => {
+    const all = [...byCategory.values()].flat();
+    const value = all.filter((v) => !v.isLiability).reduce((sum, v) => sum + v.position.value, 0);
+    const sub = [...byCategory.values()].map((items): CategoryGroup => {
+      const category = items[0].category;
+      const isLiability = category.kind === 'liability';
+      const groupValue = items.reduce((sum, v) => sum + v.position.value, 0);
+      const invested = items.reduce((sum, v) => sum + v.position.invested, 0);
+      return {
+        category,
+        items,
+        value: groupValue,
+        invested,
+        unrealized: groupValue - invested,
+        unrealizedPct: !isLiability && invested > 0 ? (groupValue - invested) / invested : null,
+        realized: items.reduce((sum, v) => sum + v.position.realized, 0),
+        weight: !isLiability && value > 0 ? groupValue / value : 0,
+      };
+    });
+    return {
+      account,
+      groups: sub,
+      value,
+      debts: all.filter((v) => v.isLiability).reduce((sum, v) => sum + v.position.value, 0),
+      invested: all.filter((v) => !v.isLiability).reduce((sum, v) => sum + v.position.invested, 0),
+      weight: assetsValue > 0 ? value / assetsValue : 0,
+      count: all.length,
+    };
+  });
 }

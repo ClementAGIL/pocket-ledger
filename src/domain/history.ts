@@ -1,7 +1,7 @@
 import { cashFlow, isIncomeTransfer } from './performance';
 import type { Portfolio } from './portfolio';
-import type { PositionState } from './positions';
-import type { ISODate } from './types';
+import { isCharge, type PositionState } from './positions';
+import type { ISODate, Transaction, TxType } from './types';
 
 export interface HistoryPoint {
   date: ISODate;
@@ -94,4 +94,45 @@ export function downsample<T>(points: T[], max = 200): T[] {
   if (points.length <= max) return points;
   const step = (points.length - 1) / (max - 1);
   return Array.from({ length: max }, (_, i) => points[Math.round(i * step)]);
+}
+
+/** Chart marks: ▲ money in (buy, deposit / borrow), ▼ money out (sell, withdraw / repay), ● income. */
+export type MarkKind = 'in' | 'out' | 'income';
+
+export interface ChartMark {
+  date: ISODate;
+  kind: MarkKind;
+  type: TxType;
+  /** Gross amount, summed over the day's operations of this type. */
+  amount: number;
+  /** Units bought or sold (BUY / SELL), null otherwise. */
+  quantity: number | null;
+  /** Number of operations merged into this mark. */
+  count: number;
+}
+
+const MARK_KINDS: Record<TxType, MarkKind> = { BUY: 'in', DEPOSIT: 'in', SELL: 'out', WITHDRAW: 'out', INCOME: 'income' };
+
+/**
+ * One mark per day and operation type, from `from` on (the chart's window), oldest first. The
+ * transactions may come from several investments (a holding in several accounts): same-day buys
+ * add up.
+ */
+export function chartMarks(transactions: Iterable<Transaction>, from: ISODate | null = null): ChartMark[] {
+  const byKey = new Map<string, ChartMark>();
+  for (const tx of transactions) {
+    // A charge (a 2.50 € exchange fee) is no money in or out: the line just dips.
+    if ((from && tx.date < from) || isCharge(tx)) continue;
+    const amount = tx.type === 'INCOME' ? tx.amount - tx.fees : tx.amount;
+    const key = `${tx.date}|${tx.type}`;
+    const mark = byKey.get(key);
+    if (mark) {
+      mark.amount += amount;
+      if (mark.quantity !== null) mark.quantity += tx.quantity ?? 0;
+      mark.count++;
+    } else {
+      byKey.set(key, { date: tx.date, kind: MARK_KINDS[tx.type], type: tx.type, amount, quantity: tx.quantity, count: 1 });
+    }
+  }
+  return [...byKey.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }

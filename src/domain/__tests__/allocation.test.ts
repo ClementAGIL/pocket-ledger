@@ -56,7 +56,7 @@ describe('buildAllocation', () => {
 });
 
 describe('foldSlices', () => {
-  const items: AllocationItem[] = [50, 20, 10, 8, 5, 4, 3].map((v, i) => ({
+  const items: AllocationItem[] = [40, 20, 10, 8, 5, 4, 3, 3, 3, 2, 2].map((v, i) => ({
     key: `k${i}`,
     label: `L${i}`,
     value: v,
@@ -64,13 +64,14 @@ describe('foldSlices', () => {
     color: null,
   }));
 
-  it('keeps everything when it fits', () => {
-    expect(foldSlices(items.slice(0, 6))).toHaveLength(6);
+  it('keeps everything when it fits the 8 colors', () => {
+    expect(foldSlices(items.slice(0, 8))).toHaveLength(8);
   });
 
-  it('folds the smallest items into "Other"', () => {
+  it('folds the smallest items into "Other", never a 9th hued slice', () => {
     const slices = foldSlices(items);
-    expect(slices).toHaveLength(6);
-    expect(slices[5]).toEqual({ key: OTHER_KEY, label: 'Other (2)', value: 7, weight: 0.07, members: ['k5', 'k6'] });
+    expect(slices).toHaveLength(8);
+    expect(slices[7]).toEqual({ key: OTHER_KEY, label: 'Other (4)', value: 10, weight: 0.1, members: ['k7', 'k8', 'k9', 'k10'] });
+    expect(foldSlices(items.slice(0, 9)).map((s) => s.key)).toEqual(['k0', 'k1', 'k2', 'k3', 'k4', 'k5', 'k6', OTHER_KEY]);
   });
 });

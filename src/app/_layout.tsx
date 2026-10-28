@@ -39,6 +39,7 @@ export default function RootLayout() {
               <Stack screenOptions={{ headerBackButtonDisplayMode: 'minimal' }}>
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 <Stack.Screen name="asset/[id]" options={{ title: '' }} />
+                <Stack.Screen name="holding" options={{ title: '' }} />
                 <Stack.Screen name="operation" options={{ presentation: 'modal', title: 'Edit operation' }} />
                 <Stack.Screen name="update-prices" options={{ title: 'Update prices' }} />
                 <Stack.Screen name="fetch-prices" options={{ presentation: 'modal', title: 'Online prices' }} />

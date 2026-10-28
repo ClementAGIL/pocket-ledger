@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Text, View } from 'react-native';
 
 import { formatDate, formatNumber } from '@/domain/format';
-import { compareEntries, timeOfPrice, timeOfTransaction } from '@/domain/positions';
+import { compareEntries, isCharge, timeOfPrice, timeOfTransaction } from '@/domain/positions';
 import type { PricePoint, Transaction } from '@/domain/types';
 import { useMoney } from '@/hooks/useMoney';
 import { space, useTheme } from '@/theme';
@@ -37,12 +37,15 @@ export function EntryLine({
   isLiability,
   units,
   link,
+  account,
 }: {
   entry: Entry;
   isLiability: boolean;
   units: boolean;
   /** Other side of a cash transfer ("Paid from Livret A"). */
   link: string | null;
+  /** The account it belongs to, on a holding page (one product in several accounts). */
+  account?: string;
 }) {
   const theme = useTheme();
   const { money } = useMoney();
@@ -53,16 +56,21 @@ export function EntryLine({
     detail = money(entry.price.price);
   } else {
     const t = entry.tx;
-    title = txLabel(t.type, isLiability);
+    title = isCharge(t) ? 'Fee' : txLabel(t.type, isLiability);
     detail =
       t.quantity !== null
         ? `${formatNumber(t.quantity)} × ${money(t.unitPrice ?? 0)}${t.fees ? ` + ${money(t.fees)} fees` : ''}`
-        : money(t.amount);
+        : isCharge(t)
+          ? `−${money(t.fees - t.amount)}`
+          : `${money(t.amount)}${t.fees ? ` − ${money(t.fees)} fees` : ''}`;
   }
   return (
     <View style={{ flex: 1, gap: 2 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text style={{ color: theme.text, fontWeight: '500' }}>{title}</Text>
+        <Text style={{ color: theme.text, fontWeight: '500', flexShrink: 1 }} numberOfLines={1}>
+          {title}
+          {account ? <Text style={{ color: theme.textMuted, fontWeight: '400' }}> · {account}</Text> : null}
+        </Text>
         <Text style={{ color: theme.textMuted, fontSize: 13 }}>{formatDate(entry.date)}</Text>
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: space.sm }}>

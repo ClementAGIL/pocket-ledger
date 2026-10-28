@@ -37,6 +37,13 @@ type Event =
 
 /** Sorts after any save time: a price without one (test fixtures only; the database always sets it) counts as end of day. */
 const END_OF_DAY = '~';
+
+/**
+ * An INCOME whose fees exceed its amount: a charge on the account (exchange connection fee,
+ * negative interest). Counted like any income, net of fees, so it lowers the value and the gain.
+ */
+export const isCharge = (tx: Transaction) => tx.type === 'INCOME' && tx.fees > tx.amount;
+
 /**
  * Save time of an entry not saved yet (form previews): after everything already saved, as it will
  * be once saved.

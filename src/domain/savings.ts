@@ -1,5 +1,5 @@
 import { addMonths } from './dates';
-import { cashFlow, isIncomeTransfer } from './performance';
+import { cashFlow } from './performance';
 import { replay } from './positions';
 import type { Snapshot } from './types';
 
@@ -8,7 +8,7 @@ export type Month = string;
 
 export interface MonthSavings {
   month: Month;
-  /** Buys (incl. fees) and deposits into assets. */
+  /** Buys (incl. fees) and deposits into assets; a buy paid from a cash account isn't counted (nor its withdrawal). */
   added: number;
   /** Sells and withdrawals from assets (net of fees), as a positive number. */
   withdrawn: number;
@@ -37,8 +37,9 @@ export const monthOf = (date: string): Month => date.slice(0, 7);
  * - assets: money put in minus money taken out (same rule as "money added" in performance);
  * - debts: every change of the balance is money, borrowing counts negative and repaying positive
  *   (a home bought 245k with a 196k loan is a 49k saving; each principal payment is a saving).
- * Dividends and interest are returns, not savings: they are not counted (nor the cash side of a
- * dividend paid into a cash account).
+ * Dividends and interest are returns, not savings: they are not counted. Linked cash transfers (a buy
+ * paid from a cash account and its withdrawal, a dividend paid into one) move money inside the
+ * portfolio: left out of both "added" and "withdrawn".
  */
 export function monthlySavings(data: Snapshot, from: Month, to: Month): SavingsSummary {
   const liabilityCategories = new Set(data.categories.filter((c) => c.kind === 'liability').map((c) => c.id));
@@ -54,8 +55,9 @@ export function monthlySavings(data: Snapshot, from: Month, to: Month): SavingsS
     const asset = assets.get(tx.assetId);
     const bucket = asset && byMonth.get(monthOf(tx.date));
     if (!asset || !bucket || liabilityCategories.has(asset.categoryId)) continue;
-    // A dividend paid into a cash account is a return, like any dividend.
-    if (isIncomeTransfer(tx, txById)) continue;
+    // Both sides of a cash link are a move inside the portfolio (a buy paid from cash, a dividend
+    // paid into it): no money added or taken out, so neither line counts them (the net is the same).
+    if (tx.linkedId != null && txById.has(tx.linkedId)) continue;
     const flow = cashFlow(asset.valuation, tx);
     if (flow > 0) bucket.added += flow;
     else bucket.withdrawn -= flow;

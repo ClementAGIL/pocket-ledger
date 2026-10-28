@@ -1,5 +1,5 @@
 import { addMonths, dayNumber } from './dates';
-import type { Portfolio } from './portfolio';
+import type { AssetView, Portfolio } from './portfolio';
 import type { PositionState } from './positions';
 import type { ISODate, Transaction, Valuation } from './types';
 
@@ -180,6 +180,8 @@ export interface PortfolioPerformance {
   /** Assets only: liabilities are not part of the gain. */
   total: Performance;
   byCategory: Map<number, Performance>;
+  /** Each account's assets (its debts left out, like the total). */
+  byAccount: Map<number, Performance>;
   byAsset: Map<number, Performance>;
 }
 
@@ -197,23 +199,35 @@ export function buildPerformance(portfolio: Portfolio, period: Period, today: IS
     byCategory.set(g.category.id, combine(g.items.map((v) => byAsset.get(v.asset.id)!), sinceStart));
   }
 
-  const assets = [...portfolio.byAssetId.values()].filter((v) => !v.isLiability);
-  const sum = combine(assets.map((v) => byAsset.get(v.asset.id)!), sinceStart);
-  // Dividends paid into a cash account stay in the portfolio: not money added for the whole
+  // Dividends paid into a cash account of the same group stay in it: not money added for the group
   // (the gain is the same, the money added and the % base are not inflated by them).
   const startDay = start ? dayNumber(start) : 0;
   const span = dayNumber(today) - startDay;
-  for (const v of assets) {
-    if (v.asset.valuation !== 'balance') continue;
-    for (const tx of portfolio.txByAsset.get(v.asset.id) ?? []) {
-      if ((start && tx.date < start) || tx.date > today || !isIncomeTransfer(tx, portfolio.txById)) continue;
-      const flow = cashFlow('balance', tx);
-      sum.netFlows -= flow;
-      sum.inflows -= flow;
-      if (start) sum.weightedFlows -= flow * (span > 0 ? (dayNumber(today) - dayNumber(tx.date)) / span : 0);
+  const groupPerformance = (views: AssetView[]) => {
+    const sum = combine(views.map((v) => byAsset.get(v.asset.id)!), sinceStart);
+    const ids = new Set(views.map((v) => v.asset.id));
+    for (const v of views) {
+      if (v.asset.valuation !== 'balance') continue;
+      for (const tx of portfolio.txByAsset.get(v.asset.id) ?? []) {
+        if ((start && tx.date < start) || tx.date > today || !isIncomeTransfer(tx, portfolio.txById)) continue;
+        if (!ids.has(portfolio.txById.get(tx.linkedId!)!.assetId)) continue;
+        const flow = cashFlow('balance', tx);
+        sum.netFlows -= flow;
+        sum.inflows -= flow;
+        if (start) sum.weightedFlows -= flow * (span > 0 ? (dayNumber(today) - dayNumber(tx.date)) / span : 0);
+      }
     }
-  }
-  const total = withPct(sum, sinceStart);
+    return withPct(sum, sinceStart);
+  };
 
-  return { period, start, total, byCategory, byAsset };
+  const assets = [...portfolio.byAssetId.values()].filter((v) => !v.isLiability);
+  const total = groupPerformance(assets);
+  const perAccount = new Map<number, AssetView[]>();
+  for (const v of assets) {
+    if (!perAccount.has(v.account.id)) perAccount.set(v.account.id, []);
+    perAccount.get(v.account.id)!.push(v);
+  }
+  const byAccount = new Map([...perAccount].map(([id, views]) => [id, groupPerformance(views)]));
+
+  return { period, start, total, byCategory, byAccount, byAsset };
 }

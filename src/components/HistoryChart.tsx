@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
-import Svg, { Defs, Line, LinearGradient, Path, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop } from 'react-native-svg';
 
+import { txLabel } from '@/components/asset/EntryLine';
 import { dayNumber } from '@/domain/dates';
-import { formatDate, formatEuro } from '@/domain/format';
+import { formatDate, formatEuro, formatNumber } from '@/domain/format';
+import type { ChartMark, MarkKind } from '@/domain/history';
 import type { ISODate } from '@/domain/types';
-import { space, useTheme } from '@/theme';
+import { space, useTheme, type Theme } from '@/theme';
 
 export interface ChartPoint {
   date: ISODate;
@@ -19,6 +21,16 @@ export interface ChartPoint {
 const HEIGHT = 180;
 const PAD_TOP = 8;
 const PAD_BOTTOM = 4;
+/** Marks strip under the chart: one lane per kind of mark present. */
+const LANE = 12;
+/** Marks closer than this (px) are drawn as one bigger mark. */
+const BUCKET = 10;
+const MARK_LANES: MarkKind[] = ['in', 'out', 'income'];
+const MARK_GLYPHS: Record<MarkKind, string> = { in: '▲', out: '▼', income: '●' };
+const markColor = (theme: Theme, kind: MarkKind) =>
+  kind === 'in' ? theme.positive : kind === 'out' ? theme.negative : theme.categorical[3];
+/** At most this many operations listed in the tooltip. */
+const MAX_TOOLTIP_MARKS = 3;
 
 export function HistoryChart({
   points,
@@ -26,12 +38,18 @@ export function HistoryChart({
   valueLabel = 'Value',
   investedLabel = 'Invested',
   benchmarkLabel = 'Benchmark',
+  marks = [],
+  isLiability = false,
 }: {
   points: ChartPoint[];
   hidden?: boolean;
   valueLabel?: string;
   investedLabel?: string;
   benchmarkLabel?: string;
+  /** Buys, sells and dividends, drawn in a strip under the chart and listed when scrubbing. */
+  marks?: ChartMark[];
+  /** Mark labels of a loan: "Borrow" / "Repay". */
+  isLiability?: boolean;
 }) {
   const theme = useTheme();
   const [width, setWidth] = useState(0);
@@ -75,6 +93,34 @@ export function HistoryChart({
 
   const shown = active !== null ? points[active] : points[points.length - 1];
 
+  // Marks inside the chart's dates, grouped by lane and pixel bucket.
+  const lastDate = points[points.length - 1].date;
+  const visibleMarks = marks.filter((m) => m.date >= points[0].date && m.date <= lastDate);
+  const lanes = MARK_LANES.filter((kind) => visibleMarks.some((m) => m.kind === kind));
+  const stripHeight = lanes.length ? lanes.length * LANE + 4 : 0;
+  const markX = (date: ISODate) =>
+    points.length === 1 ? width / 2 : Math.min(width - 5, Math.max(5, ((dayNumber(date) - xMin) / (xMax - xMin)) * width));
+  const buckets = new Map<string, { kind: MarkKind; x: number; count: number }>();
+  for (const m of visibleMarks) {
+    const px = markX(m.date);
+    const key = `${m.kind}|${Math.round(px / BUCKET)}`;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.count += m.count;
+    else buckets.set(key, { kind: m.kind, x: px, count: m.count });
+  }
+  // While scrubbing: the operations between the previous point and the touched one.
+  const activeMarks =
+    active === null ? [] : visibleMarks.filter((m) => m.date <= points[active].date && (active === 0 || m.date > points[active - 1].date));
+  const markText = (m: ChartMark) =>
+    [
+      `${txLabel(m.type, isLiability)}${m.count > 1 ? ` ×${m.count}` : ''}`,
+      m.quantity !== null && m.quantity > 0 ? formatNumber(m.quantity) : null,
+      formatEuro(m.amount, { hidden, rounded: m.amount >= 100 }),
+      formatDate(m.date),
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
   return (
     <View>
       {/* Legend doubles as the tooltip: it shows the touched point, or the latest one. */}
@@ -98,10 +144,19 @@ export function HistoryChart({
             />
           )}
         </View>
+        {activeMarks.slice(0, MAX_TOOLTIP_MARKS).map((m) => (
+          <Text key={`${m.date}${m.type}`} style={{ color: theme.textSecondary, fontSize: 12 }} numberOfLines={1}>
+            <Text style={{ color: markColor(theme, m.kind) }}>{MARK_GLYPHS[m.kind]} </Text>
+            {markText(m)}
+          </Text>
+        ))}
+        {activeMarks.length > MAX_TOOLTIP_MARKS && (
+          <Text style={{ color: theme.textMuted, fontSize: 12 }}>+{activeMarks.length - MAX_TOOLTIP_MARKS} more</Text>
+        )}
       </View>
 
       <View
-        style={{ height: HEIGHT }}
+        style={{ height: HEIGHT + stripHeight }}
         onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
@@ -113,7 +168,7 @@ export function HistoryChart({
         accessible
         accessibilityLabel={`${valueLabel} history chart`}>
         {width > 0 && (
-          <Svg width={width} height={HEIGHT}>
+          <Svg width={width} height={HEIGHT + stripHeight}>
             <Defs>
               <LinearGradient id="area" x1="0" y1="0" x2="0" y2="1">
                 <Stop offset="0" stopColor={theme.seriesValue} stopOpacity={0.22} />
@@ -136,8 +191,12 @@ export function HistoryChart({
               />
             )}
             <Path d={valuePath} stroke={theme.seriesValue} strokeWidth={2} fill="none" strokeLinejoin="round" />
+            {[...buckets.values()].map((b) => {
+              const cy = HEIGHT + 4 + lanes.indexOf(b.kind) * LANE + LANE / 2;
+              return <MarkShape key={`${b.kind}${b.x}`} kind={b.kind} x={b.x} y={cy} r={b.count > 1 ? 5 : 3.5} color={markColor(theme, b.kind)} />;
+            })}
             {active !== null && (
-              <Line x1={x(active)} x2={x(active)} y1={0} y2={HEIGHT} stroke={theme.textMuted} strokeWidth={1} />
+              <Line x1={x(active)} x2={x(active)} y1={0} y2={HEIGHT + stripHeight} stroke={theme.textMuted} strokeWidth={1} />
             )}
           </Svg>
         )}
@@ -149,6 +208,13 @@ export function HistoryChart({
       </View>
     </View>
   );
+}
+
+/** ▲ money in, ▼ money out, ● income: told apart by shape, not only by color. */
+function MarkShape({ kind, x, y, r, color }: { kind: MarkKind; x: number; y: number; r: number; color: string }) {
+  if (kind === 'income') return <Circle cx={x} cy={y} r={r * 0.85} fill={color} />;
+  const d = kind === 'in' ? r : -r;
+  return <Path d={`M${x},${y - d} L${x + r},${y + d} L${x - r},${y + d} Z`} fill={color} />;
 }
 
 function LegendItem({ color, label, value, dashed }: { color: string; label: string; value: string; dashed?: boolean }) {

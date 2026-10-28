@@ -1,4 +1,4 @@
-import { computePosition } from '../positions';
+import { computePosition, isCharge } from '../positions';
 import type { PricePoint, Transaction, TxType } from '../types';
 
 let nextId = 1;
@@ -148,6 +148,15 @@ describe('balance assets', () => {
     );
     expect(p.value).toBe(1030);
     expect(p.income).toBe(30);
+    expect(p.invested).toBe(1000);
+  });
+
+  it('a charge (income 0, fees 2.50) lowers value and income', () => {
+    const fee = tx('INCOME', '2024-12-31', { amount: 0, fees: 2.5 });
+    const p = computePosition('balance', [tx('DEPOSIT', '2024-01-01', { amount: 1000 }), fee], []);
+    expect(isCharge(fee)).toBe(true);
+    expect(p.value).toBe(997.5);
+    expect(p.income).toBe(-2.5);
     expect(p.invested).toBe(1000);
   });
 });

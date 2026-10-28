@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -50,7 +51,7 @@ function arcPath(start: number, end: number) {
 /** Part-to-whole of the assets, by category, account or investment: donut + complete table. */
 export function AllocationCard() {
   const theme = useTheme();
-  const { portfolio } = useData();
+  const { portfolio, snapshot } = useData();
   const { money } = useMoney({ rounded: true });
   const [by, setBy] = useState<AllocationBy>('category');
   const [selected, setSelected] = useState<string | null>(null);
@@ -163,6 +164,15 @@ export function AllocationCard() {
           style={styles.more}
         />
       )}
+      {by === 'category' && (
+        <TextLink
+          title={snapshot.categories.some((c) => c.targetWeight !== null) ? 'Compare with your targets' : 'Set a target allocation'}
+          role="link"
+          chevron
+          onPress={() => router.push({ pathname: '/insights', params: { section: 'targets', at: String(Date.now()) } })}
+          style={styles.targets}
+        />
+      )}
     </Card>
   );
 }
@@ -189,4 +199,5 @@ const styles = StyleSheet.create({
   dot: { width: 12, height: 12, borderRadius: 6 },
   pct: { fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] },
   more: { alignItems: 'center', paddingVertical: space.md },
+  targets: { alignSelf: 'center', paddingTop: space.md },
 });

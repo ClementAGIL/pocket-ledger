@@ -1,5 +1,6 @@
+import { holdingPerformance, type ListRow } from './holdings';
 import type { PortfolioPerformance } from './performance';
-import type { AssetView, CategoryGroup } from './portfolio';
+import type { AccountGroup, AssetView, CategoryGroup } from './portfolio';
 
 export type SortKey = 'value' | 'invested' | 'gain' | 'gainPct';
 export type SortDirection = 'desc' | 'asc';
@@ -62,4 +63,40 @@ export function sortGroups(
         compare(groupMetric(a), groupMetric(b), direction) ||
         a.category.name.localeCompare(b.category.name),
     );
+}
+
+/** Accounts, by the same key: value is the net value (assets − debts), gains are the period's. */
+export function sortAccounts(
+  accounts: AccountGroup[],
+  key: SortKey,
+  direction: SortDirection,
+  performance: PortfolioPerformance,
+): AccountGroup[] {
+  const metric = (a: AccountGroup): number | null => {
+    const perf = performance.byAccount.get(a.account.id);
+    if (key === 'value') return a.value - a.debts;
+    if (key === 'invested') return a.invested;
+    if (key === 'gain') return perf?.gain ?? null;
+    return perf?.pct ?? null;
+  };
+  return [...accounts].sort((a, b) => compare(metric(a), metric(b), direction) || a.account.name.localeCompare(b.account.name));
+}
+
+/** A category's rows (merged holdings and single investments), by the same key as `sortGroups`. */
+export function sortRows(rows: ListRow[], key: SortKey, direction: SortDirection, performance: PortfolioPerformance): ListRow[] {
+  const info = (row: ListRow) => {
+    const position = row.kind === 'asset' ? row.view.position : row.holding.position;
+    const perf = row.kind === 'asset' ? performance.byAsset.get(row.view.asset.id) : holdingPerformance(row.holding, performance);
+    const metric =
+      key === 'value' ? position.value : key === 'invested' ? position.invested : key === 'gain' ? (perf?.gain ?? null) : (perf?.pct ?? null);
+    return {
+      metric,
+      closed: row.kind === 'asset' ? row.view.isClosed : row.holding.isClosed,
+      name: row.kind === 'asset' ? row.view.asset.name : row.holding.name,
+    };
+  };
+  return rows
+    .map((row) => ({ row, ...info(row) }))
+    .sort((a, b) => Number(a.closed) - Number(b.closed) || compare(a.metric, b.metric, direction) || a.name.localeCompare(b.name))
+    .map((r) => r.row);
 }

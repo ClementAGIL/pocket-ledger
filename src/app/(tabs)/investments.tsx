@@ -3,23 +3,28 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { AllocationCard } from '@/components/AllocationCard';
+import { AccountCard } from '@/components/investments/AccountGroup';
 import { Group } from '@/components/investments/CategoryGroup';
 import { PeriodSelector } from '@/components/PeriodSelector';
 import { Chips, Segmented } from '@/components/ui';
-import { SORT_OPTIONS, sortGroups, type SortDirection, type SortKey } from '@/domain/sorting';
+import { mergeRows } from '@/domain/holdings';
+import { groupByAccount } from '@/domain/portfolio';
+import { SORT_OPTIONS, sortAccounts, sortGroups, sortRows, type SortDirection, type SortKey } from '@/domain/sorting';
 import { useData } from '@/state/DataProvider';
 import { space, useTheme } from '@/theme';
 
 export default function InvestmentsScreen() {
   const theme = useTheme();
   const { portfolio, performance } = useData();
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // Open cards: 'c<category>', 'a<account>', 'a<account>c<category>' (a category inside an account).
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [groupBy, setGroupBy] = useState<'category' | 'account'>('category');
   const [showClosed, setShowClosed] = useState(false);
   const [mode, setMode] = useState<'list' | 'allocation'>('list');
   const [sortKey, setSortKey] = useState<SortKey>('value');
   const [sortDir, setSortDir] = useState<SortDirection>('desc');
 
-  const toggle = (id: number) =>
+  const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -30,6 +35,7 @@ export default function InvestmentsScreen() {
   const groups = sortGroups(portfolio.groups, sortKey, sortDir, performance)
     .map((g) => ({ ...g, items: g.items.filter((v) => showClosed || (!v.isClosed && !v.asset.archived)) }))
     .filter((g) => g.items.length > 0);
+  const accounts = groupBy === 'account' ? sortAccounts(groupByAccount(groups, portfolio.summary.assetsValue), sortKey, sortDir, performance) : [];
 
   return (
     <ScrollView style={{ backgroundColor: theme.background }} contentContainerStyle={styles.content}>
@@ -52,6 +58,14 @@ export default function InvestmentsScreen() {
       ) : (
         <>
           <PeriodSelector />
+          <Segmented
+            options={[
+              { value: 'category', label: 'By category' },
+              { value: 'account', label: 'By account' },
+            ]}
+            value={groupBy}
+            onChange={setGroupBy}
+          />
           <View style={styles.sortRow}>
             <View style={{ flex: 1 }}>
               <Chips options={SORT_OPTIONS} value={sortKey} onChange={setSortKey} />
@@ -69,9 +83,27 @@ export default function InvestmentsScreen() {
             <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: space.xl }}>
               No investments yet. Use the Add tab to create one.
             </Text>
+          ) : groupBy === 'account' ? (
+            accounts.map((a) => (
+              <AccountCard
+                key={a.account.id}
+                group={a}
+                open={expanded.has(`a${a.account.id}`)}
+                onToggle={() => toggle(`a${a.account.id}`)}
+                isCategoryOpen={(id) => expanded.has(`a${a.account.id}c${id}`)}
+                onToggleCategory={(id) => toggle(`a${a.account.id}c${id}`)}
+              />
+            ))
           ) : (
             groups.map((g) => (
-              <Group key={g.category.id} group={g} open={expanded.has(g.category.id)} onToggle={() => toggle(g.category.id)} />
+              <Group
+                key={g.category.id}
+                group={g}
+                // The same product in several accounts is one line (By account keeps them apart).
+                rows={sortRows(mergeRows(g.items), sortKey, sortDir, performance)}
+                open={expanded.has(`c${g.category.id}`)}
+                onToggle={() => toggle(`c${g.category.id}`)}
+              />
             ))
           )}
           <View style={styles.closedToggle}>

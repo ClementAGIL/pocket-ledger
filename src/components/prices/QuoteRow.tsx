@@ -35,7 +35,7 @@ export function QuoteRow({
   const review = isFound ? reviewQuote(c.previousPrice, state.price) : null;
   const unchanged = isFound && samePrice(c.previousPrice, state.price);
   // Grayed while waiting, or when the price didn't change and is left out.
-  const muted = state.status === 'pending' || (unchanged && excluded);
+  const muted = state.status === 'pending' || state.status === 'recent' || (unchanged && excluded);
   const [tipOpen, setTipOpen] = useState(false);
   const used = isFound && state.symbol.toUpperCase() !== c.query.toUpperCase() ? ` → ${state.symbol}` : '';
 
@@ -52,6 +52,8 @@ export function QuoteRow({
           <ActivityIndicator size="small" color={theme.primary} />
         ) : state.status === 'found' ? (
           <Ionicons name="checkmark-circle" size={22} color={theme.positive} />
+        ) : state.status === 'recent' ? (
+          <Ionicons name="time-outline" size={22} color={theme.textMuted} />
         ) : state.status === 'failed' ? (
           <Ionicons name="alert-circle" size={22} color={theme.negative} />
         ) : (
@@ -66,6 +68,13 @@ export function QuoteRow({
           {c.identifier}
           {used}
         </Text>
+
+        {state.status === 'recent' && (
+          <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+            {c.previousPrice !== null ? `${unitPrice(c.previousPrice)} · ` : ''}fetched{' '}
+            {state.minutesAgo < 1 ? 'just now' : `${state.minutesAgo} min ago`}: up to date
+          </Text>
+        )}
 
         {state.status === 'found' && (
           <>
@@ -88,6 +97,7 @@ export function QuoteRow({
             <Text style={{ color: theme.textMuted, fontSize: 12 }}>
               {state.sourceCurrency !== 'EUR' ? `${sourceAmount(state.sourcePrice, state.sourceCurrency)} → ${unitPrice(state.price)} · ` : ''}
               {state.date < now ? `market close ${formatDate(state.date)}` : 'live price'}
+              {state.minutesAgo !== undefined ? ` · fetched ${state.minutesAgo < 1 ? 'just now' : `${state.minutesAgo} min ago`}` : ''}
             </Text>
             {review?.suspicious && (
               <>

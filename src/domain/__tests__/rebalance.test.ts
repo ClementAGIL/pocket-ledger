@@ -1,4 +1,4 @@
-import { planRebalance, type RebalanceInput } from '../rebalance';
+import { byShareThenTarget, byTargetThenValue, currentShares, planRebalance, type RebalanceInput } from '../rebalance';
 
 const cat = (categoryId: number, name: string, value: number, target: number | null): RebalanceInput => ({
   categoryId,
@@ -51,7 +51,41 @@ describe('planRebalance', () => {
     expect(plan.rows.map((r) => r.action).sort()).toEqual([33.33, 33.33, 33.34]);
   });
 
+  it('a target on a category not held yet gets its share of new money', () => {
+    const plan = planRebalance([cat(1, 'ETF', 9000, 0.9), cat(5, 'Gold', 0, 0.1)], 1000, 'buy-only');
+    expect(byName(plan)).toEqual({ ETF: 0, Gold: 1000 });
+    expect(plan.rows.find((r) => r.name === 'Gold')!.currentWeight).toBe(0);
+  });
+
   it('puts the biggest buy first', () => {
     expect(planRebalance(inputs, 500, 'buy-only').rows[0].name).toBe('ETF');
+  });
+});
+
+describe('currentShares', () => {
+  it('gives the current shares with one decimal, adding up to exactly 100', () => {
+    const shares = currentShares([
+      { categoryId: 1, value: 1000 },
+      { categoryId: 2, value: 1000 },
+      { categoryId: 3, value: 1000 },
+      { categoryId: 4, value: 0 },
+    ]);
+    expect([...shares.values()].sort()).toEqual([33.3, 33.3, 33.4]);
+    expect(shares.has(4)).toBe(false);
+    expect(currentShares([{ categoryId: 1, value: 700 }, { categoryId: 2, value: 300 }])).toEqual(new Map([[1, 70], [2, 30]]));
+    expect(currentShares([{ categoryId: 1, value: 0 }]).size).toBe(0);
+    expect(currentShares([{ categoryId: 1, value: 100000 }, { categoryId: 2, value: 10 }])).toEqual(new Map([[1, 100]]));
+  });
+});
+
+describe('display order', () => {
+  it('targets: by share now, then target', () => {
+    const plan = planRebalance([cat(1, 'ETF', 6000, 0.6), cat(2, 'Cash', 3000, 0.2), cat(3, 'Gold', 0, 0.1), cat(4, 'Bonds', 1000, 0.1)], 0, 'full');
+    expect([...plan.rows].sort(byShareThenTarget).map((r) => r.name)).toEqual(['ETF', 'Cash', 'Bonds', 'Gold']);
+  });
+
+  it('editor: by target, then value', () => {
+    const rows = [cat(1, 'ETF', 6000, 0.6), cat(2, 'Cash', 3000, null), cat(3, 'Gold', 0, 0.1), cat(4, 'Bonds', 0, null), cat(5, 'Crypto', 1000, 0.3)];
+    expect([...rows].sort(byTargetThenValue).map((r) => r.name)).toEqual(['ETF', 'Crypto', 'Gold', 'Cash', 'Bonds']);
   });
 });

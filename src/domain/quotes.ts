@@ -20,6 +20,8 @@ export interface QuoteCandidate {
   previousPrice: number | null;
   /** Date of that price (or of the last trade). */
   previousDate: ISODate | null;
+  /** Minutes since the current price was fetched online, when that was less than an hour ago: not fetched again. */
+  fetchedMinutesAgo: number | null;
 }
 
 export type QuoteErrorCode = 'not-found' | 'network' | 'timeout' | 'rate-limited' | 'bad-data' | 'no-fx' | 'cancelled';
@@ -81,14 +83,35 @@ export function classifyIdentifier(identifier: string, categoryName: string): { 
   return { kind: 'ticker', query: upper };
 }
 
-/** Open unit-priced investments (not debts, not archived) with an identifier, in list order. */
-export function quoteCandidates(portfolio: Portfolio): QuoteCandidate[] {
+/** Prices fetched less than this long ago are not fetched again (the sources limit the requests). */
+export const REFETCH_AFTER_MINUTES = 60;
+
+/** `'YYYY-MM-DD HH:MM:SS'` UTC save time → epoch ms (NaN when unreadable). */
+const savedAtMs = (createdAt: string) => Date.parse(`${createdAt.replace(' ', 'T')}Z`);
+
+/**
+ * Minutes since the latest price was fetched online, when it is still the current price and was
+ * saved less than `REFETCH_AFTER_MINUTES` before `now` (epoch ms); otherwise null.
+ */
+export function recentOnlineFetch(prices: PricePoint[] | undefined, currentPrice: number | null, now: number): number | null {
+  const latest = prices?.[prices.length - 1];
+  if (!latest || latest.source !== 'online' || !latest.createdAt || latest.price !== currentPrice) return null;
+  const minutes = (now - savedAtMs(latest.createdAt)) / 60_000;
+  return minutes >= 0 && minutes < REFETCH_AFTER_MINUTES ? Math.floor(minutes) : null;
+}
+
+/**
+ * Open unit-priced investments (not debts, not archived) with an identifier, in list order.
+ * With `now` (epoch ms), the ones fetched online less than an hour ago are marked (`fetchedMinutesAgo`).
+ */
+export function quoteCandidates(portfolio: Portfolio, now?: number): QuoteCandidate[] {
   const list: QuoteCandidate[] = [];
   const add = (v: AssetView) => {
     const identifier = v.asset.identifier?.trim();
     if (!identifier || v.isLiability || v.isClosed || v.asset.archived || v.asset.valuation !== 'units') return;
     const { kind, query } = classifyIdentifier(identifier, v.category.name);
-    list.push({ assetId: v.asset.id, name: v.asset.name, identifier, kind, query, previousPrice: v.position.price, previousDate: v.position.priceDate });
+    const fetchedMinutesAgo = now === undefined ? null : recentOnlineFetch(portfolio.pricesByAsset.get(v.asset.id), v.position.price, now);
+    list.push({ assetId: v.asset.id, name: v.asset.name, identifier, kind, query, previousPrice: v.position.price, previousDate: v.position.priceDate, fetchedMinutesAgo });
   };
   for (const g of portfolio.groups) g.items.forEach(add);
   return list;
@@ -223,6 +246,32 @@ export function parseCoinGeckoPrice(json: unknown, id: string): number {
   const eur = isRecord(entry) ? entry.eur : undefined;
   if (typeof eur !== 'number' || !(eur > 0)) throw new QuoteError('not-found');
   return eur;
+}
+
+/** Key of a crypto query in a CoinGecko batch answer: `BTC` → `btc`. */
+export const coinKey = (query: string) => query.trim().toLowerCase();
+
+/**
+ * What is asked online for a line: lines with the same key (one product in several accounts) share
+ * one request and its answer.
+ */
+export const quoteKey = (c: Pick<QuoteCandidate, 'kind' | 'query'>) => `${c.kind}:${c.kind === 'crypto' ? coinKey(c.query) : c.query}`;
+
+/** The CoinGecko id a coin name would have: `Shiba Inu` → `shiba-inu`. */
+export const coinIdGuess = (query: string) => coinKey(query).replace(/\s+/g, '-');
+
+/** BTC, BONK, 1INCH: asked by symbol. Longer, or with spaces (bitcoin, Shiba Inu): by CoinGecko id. */
+export const isCoinSymbol = (key: string) => /^[a-z0-9]{1,5}$/.test(key);
+
+/** CoinGecko `simple/price?symbols=…` or `?ids=…` answer (several coins) → euros per lowercase key. */
+export function parseCoinGeckoPrices(json: unknown): Map<string, number> {
+  const prices = new Map<string, number>();
+  if (!isRecord(json)) return prices;
+  for (const [key, entry] of Object.entries(json)) {
+    const eur = isRecord(entry) ? entry.eur : undefined;
+    if (typeof eur === 'number' && eur > 0) prices.set(key.toLowerCase(), eur);
+  }
+  return prices;
 }
 
 /** Quotes in a currency's minor unit (pence…): divide to get the major unit. */

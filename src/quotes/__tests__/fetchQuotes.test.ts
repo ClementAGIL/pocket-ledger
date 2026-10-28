@@ -32,6 +32,7 @@ const candidate = (assetId: number, kind: QuoteCandidate['kind'], query: string)
   query,
   previousPrice: 100,
   previousDate: '2026-09-01',
+  fetchedMinutesAgo: null,
 });
 
 async function run(candidates: QuoteCandidate[], routes: [string, number, unknown][], signal?: AbortSignal) {
@@ -59,21 +60,77 @@ describe('runQuotes', () => {
     expect(calls.filter((u) => u.includes('EURUSD')).length).toBe(1);
   });
 
-  it('resolves ISINs and crypto, falling back to Yahoo for crypto', async () => {
-    const { states } = await run(
-      [candidate(1, 'isin', 'IE00B4L5Y983'), candidate(2, 'crypto', 'BTC'), candidate(3, 'crypto', 'NEWCOIN')],
+  it('resolves ISINs, and prices every crypto in one CoinGecko request', async () => {
+    const { states, calls } = await run(
+      [candidate(1, 'isin', 'IE00B4L5Y983'), candidate(2, 'crypto', 'BTC'), candidate(3, 'crypto', 'ETH'), candidate(4, 'crypto', 'SOL')],
       [
         ['search?q=IE00B4L5Y983', 200, { quotes: [{ exchange: 'AMS', quoteType: 'ETF', symbol: 'IWDA.AS' }] }],
         ['chart/IWDA.AS', 200, chart('IWDA.AS', 131.67, 'EUR')],
-        ['search?query=BTC', 200, { coins: [{ id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', market_cap_rank: 1 }] }],
-        ['simple/price?ids=bitcoin', 200, { bitcoin: { eur: 74662 } }],
-        ['search?query=NEWCOIN', 200, { coins: [] }],
-        ['chart/NEWCOIN-EUR', 200, chart('NEWCOIN-EUR', 0.5, 'EUR')],
+        ['simple/price?vs_currencies=eur&symbols=btc,eth,sol', 200, { btc: { eur: 74662 }, eth: { eur: 2117.1 }, sol: { eur: 91.9 } }],
       ],
     );
     expect(states.get(1)).toMatchObject({ status: 'found', symbol: 'IWDA.AS', price: 131.67 });
-    expect(states.get(2)).toMatchObject({ status: 'found', symbol: 'bitcoin', price: 74662, date: '2026-10-11' });
+    expect(states.get(2)).toMatchObject({ status: 'found', symbol: 'BTC', price: 74662, date: '2026-10-11' });
+    expect(states.get(4)).toMatchObject({ status: 'found', price: 91.9 });
+    expect(calls.filter((u) => u.includes('coingecko'))).toHaveLength(1);
+  });
+
+  it('asks names by id, then tries Yahoo and the search for what the batch misses', async () => {
+    const { states, calls } = await run(
+      [candidate(1, 'crypto', 'BTC'), candidate(2, 'crypto', 'Shiba Inu'), candidate(3, 'crypto', 'NEWCOIN'), candidate(4, 'crypto', 'OLDNAME')],
+      [
+        ['&symbols=btc', 200, { btc: { eur: 74662 } }],
+        ['&ids=shiba-inu,newcoin,oldname', 200, { 'shiba-inu': { eur: 0.00001 } }],
+        ['chart/NEWCOIN-EUR', 200, chart('NEWCOIN-EUR', 0.5, 'EUR')],
+        ['search?query=OLDNAME', 200, { coins: [{ id: 'renamed', symbol: 'REN', name: 'OldName', market_cap_rank: 9 }] }],
+        ['simple/price?ids=renamed', 200, { renamed: { eur: 2 } }],
+      ],
+    );
+    expect(states.get(2)).toMatchObject({ status: 'found', price: 0.00001 });
     expect(states.get(3)).toMatchObject({ status: 'found', symbol: 'NEWCOIN-EUR', price: 0.5 });
+    expect(states.get(4)).toMatchObject({ status: 'found', symbol: 'renamed', price: 2 });
+    expect(calls.filter((u) => u.includes('symbols='))).toHaveLength(1);
+  });
+
+  it('does not ask CoinGecko coin by coin after it refused', async () => {
+    const { states, calls } = await run(
+      [candidate(1, 'crypto', 'BTC'), candidate(2, 'crypto', 'XYZ'), candidate(3, 'crypto', 'ABC')],
+      [
+        ['&symbols=', 429, 'Too Many Requests'],
+        ['chart/BTC-EUR', 200, chart('BTC-EUR', 74000, 'EUR')],
+      ],
+    );
+    expect(states.get(1)).toMatchObject({ status: 'found', symbol: 'BTC-EUR', price: 74000 });
+    expect(states.get(2)).toEqual({ status: 'failed', error: 'Too many requests: try again in a minute' });
+    expect(calls.filter((u) => u.includes('coingecko'))).toHaveLength(1);
+  });
+
+  it('no per-coin search when one of the batch requests was refused', async () => {
+    const { states, calls } = await run(
+      [candidate(1, 'crypto', 'XYZ'), candidate(2, 'crypto', 'Shiba Inu')],
+      [
+        ['&symbols=', 429, 'Too Many Requests'],
+        ['&ids=shiba-inu', 200, { 'shiba-inu': { eur: 0.00001 } }],
+      ],
+    );
+    expect(states.get(2)).toMatchObject({ status: 'found', price: 0.00001 });
+    expect(states.get(1)).toEqual({ status: 'failed', error: 'Too many requests: try again in a minute' });
+    expect(calls.filter((u) => u.includes('coingecko'))).toHaveLength(2);
+  });
+
+  it('asks each identifier once and gives the answer to every line that has it', async () => {
+    const { states, calls } = await run(
+      [candidate(1, 'ticker', 'INTC'), candidate(2, 'ticker', 'INTC'), candidate(3, 'crypto', 'BTC'), candidate(4, 'crypto', 'btc ')],
+      [
+        ['chart/INTC', 200, chart('INTC', 20, 'EUR')],
+        ['&symbols=btc', 200, { btc: { eur: 74662 } }],
+      ],
+    );
+    expect(states.get(1)).toMatchObject({ status: 'found', price: 20 });
+    expect(states.get(2)).toEqual(states.get(1));
+    expect(states.get(4)).toMatchObject({ status: 'found', price: 74662 });
+    expect(calls.filter((u) => u.includes('chart/INTC'))).toHaveLength(1);
+    expect(calls.filter((u) => u.includes('symbols=btc')).map((u) => u.split('symbols=')[1])).toEqual(['btc']);
   });
 
   it('maps failures to messages', async () => {

@@ -23,8 +23,9 @@ const light = {
   staleWarning: '#fab219',
   staleSerious: '#ec835a',
   staleCritical: '#d03b3b',
-  // Categorical slots 1–5 of the validated palette, in fixed order (allocation chart).
-  categorical: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'] as readonly string[],
+  // Categorical slots 1–8 of the validated palette, in fixed order (allocation chart). The order is
+  // what keeps neighbours apart (also for color-blind readers): never re-order or add a 9th.
+  categorical: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'] as readonly string[],
   /** "Other" slice: neutral, never a hue. */
   categoricalOther: '#b5b4ae',
 };
@@ -51,7 +52,7 @@ const dark: Theme = {
   staleWarning: '#fab219',
   staleSerious: '#ec835a',
   staleCritical: '#d03b3b',
-  categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'],
+  categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
   categoricalOther: '#5d5c57',
 };
 

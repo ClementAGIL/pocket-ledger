@@ -1,9 +1,13 @@
 import { buildPortfolio } from '../portfolio';
 import {
   classifyIdentifier,
+  coinIdGuess,
+  coinKey,
+  isCoinSymbol,
   isISIN,
   normalizeCurrency,
   parseCoinGeckoPrice,
+  parseCoinGeckoPrices,
   parseYahooChart,
   parseYahooHistory,
   pickCoinGeckoId,
@@ -12,6 +16,7 @@ import {
   QuoteError,
   quoteCandidates,
   quoteErrorMessage,
+  recentOnlineFetch,
   reviewQuote,
   samePrice,
   toEuro,
@@ -196,6 +201,36 @@ describe('candidates, review and save plan', () => {
       [1, 'ticker', 'IWDA.AS', 120],
       [4, 'crypto', 'BTC', 100],
     ]);
+  });
+
+  it('marks the prices fetched online less than an hour ago', () => {
+    const now = Date.parse('2026-10-11T10:30:00Z');
+    const online = { ...data, prices: [{ id: 1, assetId: 1, date: '2026-10-11', price: 120, source: 'online' as const, createdAt: '2026-10-11 10:05:30' }] };
+    expect(quoteCandidates(buildPortfolio(online), now).map((c) => c.fetchedMinutesAgo)).toEqual([24, null]);
+    // An hour later, or without `now`: fetched again.
+    expect(quoteCandidates(buildPortfolio(online), now + 36 * 60_000)[0].fetchedMinutesAgo).toBeNull();
+    expect(quoteCandidates(buildPortfolio(online))[0].fetchedMinutesAgo).toBeNull();
+  });
+
+  it('only counts an online price that is still the current one', () => {
+    const now = Date.parse('2026-10-11T10:30:00Z');
+    const p = (source: 'online' | 'manual', createdAt: string | null) => [{ id: 1, assetId: 1, date: '2026-10-11', price: 120, source, createdAt }];
+    expect(recentOnlineFetch(p('online', '2026-10-11 10:29:59'), 120, now)).toBe(0);
+    expect(recentOnlineFetch(p('manual', '2026-10-11 10:29:59'), 120, now)).toBeNull();
+    expect(recentOnlineFetch(p('online', null), 120, now)).toBeNull();
+    // A trade after it changed the price.
+    expect(recentOnlineFetch(p('online', '2026-10-11 10:29:59'), 125, now)).toBeNull();
+    expect(recentOnlineFetch(undefined, null, now)).toBeNull();
+  });
+
+  it('reads a CoinGecko batch answer and tells symbols from names', () => {
+    expect([...parseCoinGeckoPrices({ BTC: { eur: 74662 }, eth: { usd: 1 }, 'shiba-inu': { eur: 0.00001 }, bad: null })]).toEqual([
+      ['btc', 74662],
+      ['shiba-inu', 0.00001],
+    ]);
+    expect(['btc', 'bonk', '1inch', 'bitcoin', 'shiba inu'].map(isCoinSymbol)).toEqual([true, true, true, false, false]);
+    expect(coinIdGuess(' Shiba  Inu ')).toBe('shiba-inu');
+    expect(coinKey('BTC')).toBe('btc');
   });
 
   it('recognizes an unchanged price', () => {

@@ -120,6 +120,8 @@ export interface PortfolioReturns {
    * only the investment page shown needs it, not all of them after every change.
    */
   forAsset: (assetId: number) => AnnualizedReturn | undefined;
+  /** Several investments together (one holding in several accounts), flows summed per day. Not cached. */
+  forAssets: (assetIds: number[]) => AnnualizedReturn | undefined;
 }
 
 export function buildReturns(portfolio: Portfolio, today: ISODate): PortfolioReturns {
@@ -129,15 +131,15 @@ export function buildReturns(portfolio: Portfolio, today: ISODate): PortfolioRet
     return investmentFlows(v.asset.valuation, portfolio.txByAsset.get(id) ?? [], v.position.value, today);
   };
 
-  // Portfolio flows are summed per day: same result, far fewer terms for the solver.
-  const totalByDate = new Map<ISODate, number>();
-  for (const id of portfolio.byAssetId.keys()) {
-    for (const f of flowsOf(id) ?? []) totalByDate.set(f.date, (totalByDate.get(f.date) ?? 0) + f.amount);
-  }
-  const total = annualized(
-    [...totalByDate].map(([date, amount]) => ({ date, amount })),
-    today,
-  );
+  // Flows are summed per day: same result, far fewer terms for the solver.
+  const summed = (ids: Iterable<number>) => {
+    const byDate = new Map<ISODate, number>();
+    for (const id of ids) {
+      for (const f of flowsOf(id) ?? []) byDate.set(f.date, (byDate.get(f.date) ?? 0) + f.amount);
+    }
+    return [...byDate].map(([date, amount]) => ({ date, amount }));
+  };
+  const total = annualized(summed(portfolio.byAssetId.keys()), today);
 
   const cache = new Map<number, AnnualizedReturn | undefined>();
   const forAsset = (id: number) => {
@@ -147,5 +149,12 @@ export function buildReturns(portfolio: Portfolio, today: ISODate): PortfolioRet
     }
     return cache.get(id);
   };
-  return { total, forAsset };
+  const forAssets = (ids: number[]) => {
+    const assets = ids.filter((id) => {
+      const v = portfolio.byAssetId.get(id);
+      return v && !v.isLiability;
+    });
+    return assets.length ? annualized(summed(assets), today) : undefined;
+  };
+  return { total, forAsset, forAssets };
 }

@@ -1,7 +1,11 @@
 import {
+  coinIdGuess,
+  coinKey,
+  isCoinSymbol,
   isISIN,
   normalizeCurrency,
   parseCoinGeckoPrice,
+  parseCoinGeckoPrices,
   parseYahooChart,
   parseYahooHistory,
   pickCoinGeckoId,
@@ -9,6 +13,7 @@ import {
   rankYahooSymbols,
   QuoteError,
   quoteErrorMessage,
+  quoteKey,
   toEuro,
   type QuoteCandidate,
   type RawHistory,
@@ -41,8 +46,11 @@ export interface FetchedQuote {
 export type QuoteState =
   | { status: 'pending' }
   | { status: 'fetching' }
-  | ({ status: 'found' } & FetchedQuote)
-  | { status: 'failed'; error: string };
+  /** `minutesAgo`: found earlier in this app session and shown again (not asked again). */
+  | ({ status: 'found'; minutesAgo?: number } & FetchedQuote)
+  | { status: 'failed'; error: string }
+  /** Fetched online less than an hour ago: not asked again. */
+  | { status: 'recent'; minutesAgo: number };
 
 interface Context {
   fetch: typeof fetch;
@@ -50,6 +58,11 @@ interface Context {
   signal?: AbortSignal;
   /** EUR → currency rate, fetched once per currency per run. */
   fx: Map<string, Promise<number>>;
+  /** Every crypto of the run (`coinKey`), priced together by `coinGeckoPrices`. */
+  coinKeys: string[];
+  coins?: Promise<Map<string, number>>;
+  /** A batch request CoinGecko refused or failed: no per-coin search after it. */
+  coinFailure?: unknown;
 }
 
 async function getJson(ctx: Context, url: string): Promise<unknown> {
@@ -119,20 +132,58 @@ async function coinGeckoQuote(ctx: Context, query: string): Promise<FetchedQuote
   return { symbol: id, sourcePrice: price, sourceCurrency: 'EUR', price, date: ctx.today };
 }
 
+/**
+ * All the run's coins at once (CoinGecko's free API allows only a few requests per minute): one
+ * request for the symbols (BTC: the largest coin with that symbol), one for the names
+ * (bitcoin, shiba-inu), each only when needed. Never by symbol for a name: "bitcoin" is also a
+ * tiny token's symbol. Fails only when every request failed.
+ */
+async function coinGeckoPrices(ctx: Context): Promise<Map<string, number>> {
+  const prices = new Map<string, number>();
+  let failure: unknown = null;
+  const ask = async (param: 'symbols' | 'ids', keys: string[]) => {
+    if (keys.length === 0) return;
+    try {
+      const json = await getJson(ctx, `${COINGECKO}/simple/price?vs_currencies=eur&${param}=${keys.map(encodeURIComponent).join(',')}`);
+      for (const [key, price] of parseCoinGeckoPrices(json)) prices.set(key, price);
+    } catch (e) {
+      if (e instanceof QuoteError && e.code === 'cancelled') throw e;
+      failure = e;
+      ctx.coinFailure = e;
+    }
+  };
+  const symbols = ctx.coinKeys.filter(isCoinSymbol);
+  const names = [...new Set(ctx.coinKeys.filter((k) => !isCoinSymbol(k)).map(coinIdGuess))];
+  await ask('symbols', symbols);
+  await ask('ids', names);
+  if (failure && prices.size === 0) throw failure;
+  return prices;
+}
+
 const yahooSearch = (ctx: Context, isin: string) =>
   getJson(ctx, `${YAHOO}/v1/finance/search?q=${encodeURIComponent(isin)}&quotesCount=10&newsCount=0`);
 
 async function fetchQuote(ctx: Context, c: QuoteCandidate): Promise<FetchedQuote> {
   if (c.kind === 'crypto') {
+    let busy: unknown = null;
     try {
-      return await coinGeckoQuote(ctx, c.query);
+      const prices = await (ctx.coins ??= coinGeckoPrices(ctx));
+      const key = coinKey(c.query);
+      const price = prices.get(isCoinSymbol(key) ? key : coinIdGuess(key));
+      if (price !== undefined) return { symbol: c.query, sourcePrice: price, sourceCurrency: 'EUR', price, date: ctx.today };
     } catch (e) {
       if (e instanceof QuoteError && e.code === 'cancelled') throw e;
-      // Fallback: Yahoo's crypto pairs (BTC-EUR). Report CoinGecko's error if that fails too.
-      return yahooQuote(ctx, `${c.query.toUpperCase()}-EUR`).catch(() => {
-        throw e;
-      });
+      busy = e;
     }
+    // Not in the batch (a name) or CoinGecko unavailable: Yahoo's pair (BTC-EUR), then, only when
+    // CoinGecko answered, its search. Never one CoinGecko request per coin after a refusal.
+    try {
+      return await yahooQuote(ctx, `${c.query.toUpperCase()}-EUR`);
+    } catch (e) {
+      busy ??= ctx.coinFailure;
+      if (busy || (e instanceof QuoteError && e.code === 'cancelled')) throw busy ?? e;
+    }
+    return coinGeckoQuote(ctx, c.query);
   }
   if (c.kind === 'isin') {
     return yahooQuote(ctx, pickYahooSymbol(await yahooSearch(ctx, c.query)));
@@ -148,20 +199,31 @@ export async function runQuotes(
   candidates: QuoteCandidate[],
   opts: { today: ISODate; onUpdate: (assetId: number, state: QuoteState) => void; signal?: AbortSignal; fetch?: typeof fetch },
 ): Promise<void> {
-  const ctx: Context = { fetch: opts.fetch ?? fetch, today: opts.today, signal: opts.signal, fx: new Map() };
+  const coinKeys = [...new Set(candidates.filter((c) => c.kind === 'crypto').map((c) => coinKey(c.query)))];
+  const ctx: Context = { fetch: opts.fetch ?? fetch, today: opts.today, signal: opts.signal, fx: new Map(), coinKeys };
+  // Each identifier is asked once; its answer goes to every line that has it.
+  const groups = new Map<string, QuoteCandidate[]>();
+  for (const c of candidates) {
+    const key = quoteKey(c);
+    const group = groups.get(key);
+    if (group) group.push(c);
+    else groups.set(key, [c]);
+  }
+  const queue = [...groups.values()];
   let next = 0;
   const worker = async () => {
-    while (next < candidates.length && !opts.signal?.aborted) {
-      const c = candidates[next++];
-      opts.onUpdate(c.assetId, { status: 'fetching' });
+    while (next < queue.length && !opts.signal?.aborted) {
+      const group = queue[next++];
+      const update = (state: QuoteState) => group.forEach((c) => opts.onUpdate(c.assetId, state));
+      update({ status: 'fetching' });
       try {
-        opts.onUpdate(c.assetId, { status: 'found', ...(await fetchQuote(ctx, c)) });
+        update({ status: 'found', ...(await fetchQuote(ctx, group[0])) });
       } catch (e) {
-        opts.onUpdate(c.assetId, { status: 'failed', error: quoteErrorMessage(e) });
+        update({ status: 'failed', error: quoteErrorMessage(e) });
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, candidates.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
 }
 
 export interface MonthlyHistory {
@@ -189,7 +251,7 @@ export async function fetchMonthlyHistory(
   identifier: string,
   opts: { from?: string; fetch?: typeof fetch; signal?: AbortSignal } = {},
 ): Promise<MonthlyHistory> {
-  const ctx: Context = { fetch: opts.fetch ?? fetch, today: '9999-12-31', signal: opts.signal, fx: new Map() };
+  const ctx: Context = { fetch: opts.fetch ?? fetch, today: '9999-12-31', signal: opts.signal, fx: new Map(), coinKeys: [] };
   const id = identifier.trim();
   const symbols = isISIN(id) ? rankYahooSymbols(await yahooSearch(ctx, id)) : [id];
   let best: (Awaited<ReturnType<typeof yahooHistory>> & { symbol: string }) | null = null;

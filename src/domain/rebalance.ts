@@ -93,3 +93,36 @@ export function planRebalance(inputs: RebalanceInput[], newMoney: number, mode: 
 
   return { rows, excluded, total, targetSum, valid };
 }
+
+/**
+ * Today's share of each category with a value, in % with one decimal, adding up to exactly 100
+ * (largest remainders get the leftover tenths): "Use my current allocation" as a starting target.
+ */
+export function currentShares(inputs: Pick<RebalanceInput, 'categoryId' | 'value'>[]): Map<number, number> {
+  const held = inputs.filter((i) => i.value > 0);
+  const total = held.reduce((s, i) => s + i.value, 0);
+  if (total <= 0) return new Map();
+  const tenths = held.map((i) => {
+    const exact = (i.value / total) * 1000;
+    return { id: i.categoryId, floor: Math.floor(exact), rest: exact - Math.floor(exact) };
+  });
+  let left = 1000 - tenths.reduce((s, t) => s + t.floor, 0);
+  for (const t of [...tenths].sort((a, b) => b.rest - a.rest)) {
+    if (left <= 0) break;
+    t.floor++;
+    left--;
+  }
+  // A share rounding to 0% stays without a target rather than a 0% one.
+  return new Map(tenths.filter((t) => t.floor > 0).map((t) => [t.id, t.floor / 10]));
+}
+
+/** Display order of the target rows: largest share now first, then largest target, then name. */
+export const byShareThenTarget = (a: RebalanceRow, b: RebalanceRow) =>
+  b.currentWeight - a.currentWeight || b.target - a.target || a.name.localeCompare(b.name);
+
+/**
+ * Display order of the target editor: largest target first, then largest value (categories without
+ * a target, then those not held), then name.
+ */
+export const byTargetThenValue = (a: { target: number | null; value: number; name: string }, b: { target: number | null; value: number; name: string }) =>
+  (b.target ?? -1) - (a.target ?? -1) || b.value - a.value || a.name.localeCompare(b.name);
