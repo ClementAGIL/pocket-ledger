@@ -21,14 +21,18 @@ Personal finance tracker (Expo SDK 57 / React Native). The user enters everythin
 ```
 src/app/                 Expo Router screens only (their sub-components live in src/components)
   (tabs)/index           Portfolio (home): net worth, period gain, GoalsCard, chart, performance, today;
-                         header: reminders, online prices (sync icon), hide amounts, settings
+                         header: reminders, check-in (calendar icon), online prices (sync icon), hide amounts, demo, settings
   (tabs)/investments     List (sortable; by category, or by account → categories → investments) | Allocation donut
   (tabs)/insights        Sections (switch at the top): Savings (+ emergency fund) | Targets | Goals;
                          opened on a section with ?section=savings|targets|goals&at=<timestamp> (&focus=emergency scrolls to the fund)
   (tabs)/add             Operation form (components/operation/OperationForm)
+  onboarding             Introduction (full-screen modal, 6 swiped pages, lock + demo on the last); once per install
+  checkin                Monthly check-in (?month=YYYY-MM): month gain, savings, movers, then big losses / prices / reviews / scheduled
   holding                Same product in several accounts (?holding=<holdingKey>): summed chart & position,
                          merged history with an account tag, links to each investment page
-  asset/[id]             Investment page: chart, position, notes & review, history (FlatList; price updates hidden until "Show", not saved)
+  asset/[id]             Investment page: chart, position, schedules & loan details, notes & review, history (FlatList; price updates hidden until "Show", not saved)
+  schedule               Modal: add/edit a scheduled operation (?asset=ID&id=SID)
+  scheduled              Review of the scheduled operations due: amount / price / interest per line, Save all + Undo
   operation              Modal: add/edit an entry (editing the cash side of a transfer opens the main side)
   update-prices          Bulk price/balance entry + "Fetch prices online" button
   fetch-prices           Modal: online fetch with progress, old → new review, Save + Undo
@@ -36,20 +40,23 @@ src/app/                 Expo Router screens only (their sub-components live in 
 src/domain/              PURE TypeScript (no React/Expo imports), unit-tested in __tests__/
   types, dates, format              model, local dates, € / duration formatting, number parsing
   positions, portfolio, history     replay engine + entry order, totals & groups & indexes, time series
-  performance                       period gains (Modified Dietz), cashFlow() rule
+  performance                       period gains (Modified Dietz), cashFlow() rule; performanceBetween(start, end) for any range
+  checkin                           monthly check-in: month range, gain, savings, movers, checkInDue (Home card)
   benchmark, savings, allocation    "what if X%" line, monthly savings, donut data
   staleness, reviews, priceUpdates  update reminders, review dates, bulk price parsing
   repayments, sorting, rebalance    loan repayment planning, list sort, target allocation plan
+  schedules                         scheduled operations: due dates, review drafts → records, loan split / payoff, schedule form
   returns                           real annualized return (XIRR), overall, per investment, per holding (forAssets)
   holdings                          same identifier + category in several accounts: holdingKey, mergeRows, sums
   operations                        Add-operation rules: offered ops, validation, records, preview, cash link
   quotes                            online prices: candidates, identifiers, source parsing, EUR conversion
   emergency                         emergency fund, cash advice, goal progress
   projection                        Goals simulation: growth, saving pace, goal / FIRE date, inflation
+  milestones                        goal / emergency fund reached: keys, newlyReached, check-in month values
 src/db/                  migrations.ts (schema), repo.ts (all SQL), demo.ts (dev data),
                          nodeTestDatabase.ts (expo-sqlite stand-in on node:sqlite, tests only)
 src/state/               DataMode (real / demo database, SQLiteProvider), DataProvider (loads everything, computes,
-                         write(), settings, today), UndoProvider
+                         write(), settings, today), UndoProvider, onboarding (seen-once flag)
 src/backup/              format (plain JSON), encryption + encoding (password backups),
                          backup (export/import I/O), autoBackup + autoBackupRules (local safety net)
 src/quotes/fetchQuotes   the only network code: Yahoo (chart, ISIN search, FX) + CoinGecko
@@ -61,12 +68,16 @@ src/hooks/               useMoney (€ + hide amounts), useNumberDraft (typed nu
                          useOnlinePricesEntry lives in OnlinePricesIntro
 src/components/          ui.tsx primitives (Button incl. outline + icon, ProgressBar, Chips…), charts
                          (HistoryChart, SavingsChart, AllocationCard), GoalsCard, MonthlySavings, EmergencyFund,
-                         Simulation (Goals), TargetAllocation, OnlinePricesIntro, StartupError, saveError, forms…
+                         Simulation (Goals), TargetAllocation, OnlinePricesIntro, StartupError, saveError, forms…,
+                         AppIcon (the icon in SVG, arrow drawable) + AnimatedSplash
+  celebration/           Confetti (one clock, physics per piece) · GoalCelebration (watcher + full-screen modal)
   goals/                 GoalCard · ProjectionCard · GrowthCard · SavingCard (Simulation holds the state)
   operation/             OperationForm (state + save) · NewAssetFields · OperationFields · Preview
+  onboarding/            scene (choreography engine: Scene canvas 280×220, Piece flies in `from` during its `at`
+                         window, Draw strokes a path; theme colors only) · Illustrations (one scene per page)
   home/                  HeaderButtons (reminder, icon buttons) · Reminders (prices to update, reviews due)
   investments/           CategoryGroup (category card + its investment rows; `nested` inside an account) · AccountGroup
-  asset/                 EntryLine (history line, entry order, operation labels) · EditAsset
+  asset/                 EntryLine (history line, entry order, operation labels) · EditAsset · ScheduleCard (+ loan details)
   prices/                PriceRow (Update prices) · QuoteRow (Online prices)
   settings/              one component per Settings section + shared rows
 scripts/import/          statement → backup converter, run on a computer (npm run import): ledger (merge into a
@@ -105,7 +116,7 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
 
 ### Database
 
-- Tables: `categories` (`target_weight`, `update_reminder`), `accounts`, `assets` (`review_date`), `transactions` (`linked_id`, `created_at`), `prices` (`source`, `created_at`, one per asset per day), `settings` (key/value strings).
+- Tables: `categories` (`target_weight`, `update_reminder`), `accounts`, `assets` (`review_date`), `transactions` (`linked_id`, `created_at`), `prices` (`source`, `created_at`, one per asset per day), `schedules` (`done_until`, `cash_asset_id` set null when that asset goes, `rate` for loans), `settings` (key/value strings).
 - `migrate()` applies `MIGRATIONS` up to `SCHEMA_VERSION` (`PRAGMA user_version`). A database newer than the app is recreated in development and refused in a release build (`isDev` option for tests).
 
 ## Feature rules worth knowing
@@ -127,10 +138,26 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
   - `sumStates()`: quantities, values, costs, realized and income summed, price = the most recently known; avg cost = invested / quantity; period gain = `combine()` of the investments (`holdingPerformance`);
   - `/holding` page: `buildHistory` over the investments' steps, chart marks of all of them, history with each entry's account; editing, notes, reviews and deleting stay on each investment page.
 - **Chart marks** (`chartMarks()` in `history.ts`, `HistoryChart` `marks` prop): one mark per day and operation type (summed across investments; income net of fees, charges left out), ▲ in (BUY / DEPOSIT) · ▼ out (SELL / WITHDRAW) · ● INCOME, one lane per kind under the chart, marks within 10 px drawn as one bigger mark; while scrubbing, the legend lists the operations since the previous point (amounts via `formatEuro(…, { hidden })`). Colors `positive` / `negative` / `categorical[3]`, always with the shape.
+- **Home chart projection** (`settings.chartProjection`, "With projection" switch under the chart, off by default): `projectMonths(nominalPlan(…))` = the Goals rate and saving without inflation, from today's assets; length `chartProjectionMonths()` = the period shown (MTD 1 month, YTD / 12M 12 months, ALL the history's length); `ChartPoint.projected` points are drawn dashed after a "today" divider, without area fill or comparison value; net worth view keeps today's debts.
 - **Comparison line** (`benchmark.ts`, `settings.benchmarkRate`, 0 = off): flows compounded at X%/yr, dividends leave it. Computed in one pass; never stored.
 - **Update reminders:** based on `position.priceDate` (last price, trade or balance change; dividends don't count); levels in the category's period: 1 gray · 2–3 yellow · 4–6 orange · 6+ red; `never` is never late; `theme.stale*` colors always paired with an icon + label; closed and archived positions are ignored.
 - **Reviews:** due on and after `reviewDate` (`reviews.ts`); shown in the list, the home reminder and the investment page.
+- **Big loss warning** (`bigLoss()` in `reviews.ts`, `BIG_LOSS` = −25%): a tracked, non-debt position with `unrealizedPct` ≤ −25% (vs average cost):
+  - `LossBadge` on the row (holdings: on the summed figures) for as long as it lasts, a banner on the investment page;
+  - "to review" in the Home reminders (`reviewReason()` 'loss', listed first) until a later review is planned: "Reviewed: look again in 3 months" (`NotesCard`) sets `reviewDate` (no extra column);
+  - the check-in lists all of them.
+- **Monthly check-in** (`checkin.ts`, `app/checkin.tsx`): opens on the last complete month (‹ › from the first month with data to the current one, shown "so far"):
+  - gain via `performanceBetween()` (assets, like Home), `monthlySavings()` of the month, top 3 gainers / losers by € (≥ 0.50 €);
+  - then today's to-dos: big losses, prices to update, reviews whose date has come (losses not repeated);
+  - Home `CheckInCard` during the first 10 days of a month until opened (`checkInDue()`, `settings.checkInSeen` set when the last complete month is shown); permanent links: the Home header calendar icon, under the Performance card and in the reminders window; the monthly notification opens it.
 - **Target allocation** (`rebalance.ts`): only categories with a target take part, targets must sum to 100%; "buy-only" splits new money over the deficits, "full" gives exact buys/sells; rounded to the cent, keeping the exact total. `TargetAllocation` accepts `investAmount` (pre-filled) and `startEditing`; "Use my current allocation" / "Current" pre-fill the editor with `currentShares()` (one decimal, sums to 100, a share rounding to 0 stays without a target, nothing saved before Save). Investments › Allocation › Category links to Insights › Targets. The editor lists every asset category: held or targeted ones first, the others ("not held yet") on demand; a target on an empty category takes part like any other (0% now). Order: the targets list by share now, then target (`byShareThenTarget`; "Next: buy" stays the biggest buy); the editor by target, then value (`byTargetThenValue`), fixed when it opens.
+- **Scheduled operations** (`schedules.ts`, `schedules` table, `app/schedule.tsx` form, `app/scheduled.tsx` review):
+  - monthly on `day` (clamped to the month's end) from `startDate`; `doneUntil` = the last occurrence reviewed (saved or skipped); a new start date clears it; at most 120 due at once;
+  - **nothing is saved on its own**: Home reminders (`ScheduledReminder`, also in the check-in) → review screen (list fixed when it opens), each line ticked by default, adjustable; unticked = skipped; Save → `repo.saveScheduled`, undo → `repo.undoScheduled` (deletes the rows, restores each `doneUntil`);
+  - BUY: quantity = amount / price (default the last price), the cash WITHDRAW is **linked** (like the Add form); DEPOSIT / WITHDRAW of a balance: the cash side is **not linked** (money moved between own accounts nets to 0 anyway);
+  - **loan payment** (liability WITHDRAW with a `rate`): interest = balance × rate / 12 (`loanSplit`), stored as the repayment's **`fees`** (so only the principal lowers the balance; history "X + Y interest"), the cash side = the whole payment, **not linked** (savings: −interest net); several due months chain the balance (`draftOccurrences`);
+  - investment page `ScheduleCard`: schedules, loan interest this month, `loanPayoff()` date + interest left, `interestPaid()`, `repayOrInvest()` vs `returns.total` (meaningful only);
+  - deleting an investment cascades its schedules and nulls `cash_asset_id` elsewhere; `restoreAsset` gets `{ own, paidFrom }` to put both back.
 - **Loan "Repay by new balance":** `planRepayments()` splits the principal equally over monthly payment dates; the last payment absorbs the rounding.
 - **Add form** (`operations.ts` + `OperationForm`):
   - Buy / Sell start from the asset's last unit price;
@@ -141,11 +168,17 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
   - rate: "Yours" = `returns.total` (7% before a year of history), 4/7/10%, custom;
   - "Your pace" = `savingPace()`: net money into assets per month over the last 12 complete months, exceptional months left out, × 12; loan repayments don't count;
   - goal = an amount or FIRE (25× yearly spending); `monthsToReach()` searches up to 100 years; `goalProgress()` for the bars;
+  - under the projection: "your money doubles every ~N years" (`doublingYears()`, the rate chosen; in today's money too when inflation is on; hidden when the rate ≤ 0);
+  - FIRE goal card: "you can cover X of yearly spending" = assets × `FIRE_WITHDRAWAL_RATE` (the same 4% rule);
   - all choices in `settings.projection` (one JSON setting, `parseProjectionSettings` is tolerant).
 - **Emergency fund** (Insights › Savings: `emergency.ts`, `components/EmergencyFund.tsx`):
   - target = months (3/6/12) × monthly expenses (`settings.projection.yearlySpending / 12`, shared with FIRE), vs the value of the category named "Cash" (`isCashCategory`);
   - `cashAdvice()`: what to keep = max(emergency fund, Cash target in € = weight × assets with a target). Above it (from 1 cent, so it always agrees with the rebalancing): "invest X" + link to Targets › Invest new money pre-filled. Between the fund and the Cash target: `held-for-target` explanation + link to the target editor;
   - the target editor's Cash row suggests a share (`emergencyShare`) with "Use X%".
+- **Goal celebrations** (`milestones.ts`, `components/celebration/`): the goal (amount or FIRE, vs assets) and the emergency fund (vs the Cash category):
+  - in the app: `GoalCelebrations` (root layout) compares the values before / after each **data** change (operation, price update…); a crossing not yet in `settings.celebratedGoals` (JSON list of `Milestone.key` = kind + target, the last 20) opens a full-screen modal (trophy, rays, confetti) after 700 ms; loading, a demo switch or editing the goal never celebrates; a new target can be celebrated again;
+  - check-in: `CheckIn.values` (assets and cash at the month's start / end); a crossing during the month shows a "Goal reached in …" card and confetti (each time that month is shown; today's targets);
+  - texts via `useMilestoneText()` (amounts respect "hide amounts"); no confetti with reduced motion.
 - **Home `GoalsCard`:** goal and emergency fund progress (covered shows the %), each opening its Insights section; "Set a goal…" when neither is set (hidden while there's no investment).
 - **Home reminders** (header button + window): prices to update, reviews due, and "Plan ahead" while a goal or the emergency fund isn't set (`missingSetup()` in `projection.ts`; also on a fresh install or after a reset). Each line opens its section; "Don't remind me" sets `settings.setupReminderDismissed`.
 - **Online prices** (`quotes.ts`, `fetchQuotes.ts`, `app/fetch-prices.tsx`):
@@ -159,18 +192,23 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
   - each found line has a checkbox, ticked by default except unchanged prices (`samePrice`: equal at the displayed decimals), which start unticked and grayed; changes over ±30% show a "Big price change" label with a tap-to-open explanation (a warning, not an error);
   - price `source` is shown in the history ("Fetched online" / "Entered manually");
   - jest-expo mocks `fetch`: tests pass a fake `fetch` to `runQuotes`.
+- **Splash + introduction:**
+  - the native splash (`expo-splash-screen`, same background and icon) hides when the data is loaded; `AnimatedSplash` (root layout, above everything incl. the lock) then plays one timeline (~1.8 s): your things pop up around the icon and fly into the pocket phone, the arrow draws with a ripple and sparks, a faint rising line crosses the screen, the name drops in letter by letter; the finished picture holds `HOLD_MS` (0.7 s), then it fades out (a quick fade with reduced motion; the icon stays centered at the native splash's size so the hand-off is seamless); it plays once per launch (a demo switch doesn't replay it). Expo Go shows its own native splash first;
+  - `/onboarding`: opened by Home on the first start (`onboardingSeen()` in `expo-sqlite/kv-store`, key `onboardingSeen`, global like `dataMode`), only when the real database has no investment (an update with data just sets the flag); Settings › Help › "Show the introduction" replays it. Last page: turn on the lock (same checks as Settings), "Explore with demo data first";
+  - each page has its own animated illustration (`components/onboarding/Illustrations`): its timeline (~2.2 s) plays when the page is more than half in view and rewinds once it's off screen, so it replays; reduced motion shows it at once;
+  - keep the pages in step with the features when a major one is added.
 - **Demo mode** (`state/DataMode.tsx`): a second database file (`pocketledger-demo.db`) for showing the app (interviews…):
   - entered from the Home flask icon, at once (no dialog: the real amounts would show behind it; hidden in demo); the way back is only Settings › Demo data (last section) › "Back to my data", always confirmed;
   - the mode is stored outside both databases (`expo-sqlite/kv-store`, key `dataMode`); a switch remounts everything (`key` on `SQLiteProvider`), so the lock asks again when going back;
   - the demo database is rebuilt from `demo.ts` each time it opens; settings are per database;
   - in demo: no automatic backups (they'd push out the real ones), Reminder and Backup sections hidden, the monthly reminder isn't touched.
-- **Notifications** are local only (no push server).
+- **Notifications** are local only (no push server). The monthly one says "Your monthly check-in is ready" and opens `/checkin`.
   - **Never import `expo-notifications` statically** (only `import type`): Expo Go on Android throws when loading it, which crashes the app.
   - Use `loadNotifications()`, which returns null where it's unavailable.
 - **Backups:**
   - **Automatic local backups** (`Documents/backups`, unencrypted, keep the last N): one before the first `write()` of the day (in `DataProvider`), plus `safetyBackup()` before any restore, reset or delete-all. Best effort: a failed backup must never block a change.
   - **Exports** can be password-encrypted: scrypt (N=2^14, about 5–10 s on a phone, on purpose) + XChaCha20-Poly1305 via `@noble/*`, pure JS. All parameters are stored in the file.
-  - **Format** (`FORMAT_VERSION`): prices carry `source` and `createdAt`, transactions `linkedId` and `createdAt`; a link to a missing transaction is dropped.
+  - **Format** (`FORMAT_VERSION` 9, 8 still read): prices carry `source` and `createdAt`, transactions `linkedId` and `createdAt`, `schedules` (since 9); a link to a missing transaction is dropped, a schedule's missing cash asset becomes "not tracked".
 
 - **Statement import** (`scripts/import/`, not in the app):
   - `npm run import -- <format> <csv> [--out file] [--account name] [--no-prices]` (tsx); a converter returns an `ImportedAccount` (assets + operations in EUR, `cash` = linked cash side) and warnings for every line it doesn't understand;
@@ -208,7 +246,7 @@ assets/icon-source/      SVG sources of the app icon (suit with a phone showing 
   - series colors are validated palette slots (`seriesValue`, `seriesInvested`, `seriesBenchmark`, `categorical`), so don't swap them by eye;
   - at most 9 donut segments (`MAX_SLICES`: up to 8 items each get a validated `categorical` slot; from 9, the 7 largest + "Other"; never a 9th hue); by investment, a holding in several accounts is one segment.
 - **Demo data** (`src/db/demo.ts`; demo mode in every build, Settings › Development "Reset with demo data" `__DEV__` only):
-  - keep it exercising every feature: all staleness levels, due reviews, a loan last updated 4 months ago, real Yahoo tickers (CW8.PA, ESE.PA, TTE.PA, NOKIA.HE, AAPL…), a bond ISIN that isn't found, a few online prices, 3 buys paid from the checking account;
+  - keep it exercising every feature: all staleness levels, due reviews, big losses (Ethereum at exactly −32% vs average cost, Peloton far lower), scheduled operations due, a loan last updated 4 months ago, real Yahoo tickers (CW8.PA, ESE.PA, TTE.PA, NOKIA.HE, AAPL…), a bond ISIN that isn't found, a few online prices, 3 buys paid from the checking account;
   - its prices are invented, so a real fetch shows many "Big price change" labels;
   - `demo.test.ts` checks it on real SQLite.
 

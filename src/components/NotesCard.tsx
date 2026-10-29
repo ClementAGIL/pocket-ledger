@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import * as repo from '@/db/repo';
 import { addMonths } from '@/domain/dates';
-import { formatDate } from '@/domain/format';
+import { formatDate, formatPercent } from '@/domain/format';
 import { isReviewDue } from '@/domain/reviews';
 import type { Asset, ISODate } from '@/domain/types';
 import { useData, useToday } from '@/state/DataProvider';
@@ -19,8 +19,11 @@ const QUICK_DATES = [
   { value: '12', label: 'In 1 year' },
 ] as const;
 
-/** Why you hold an investment and when to look at it again. */
-export function NotesCard({ asset }: { asset: Asset }) {
+/**
+ * Why you hold an investment and when to look at it again. `lossToReview`: down 25% or more with
+ * no later review planned (`reviewReason` 'loss'): asks for a look, silenced by planning one.
+ */
+export function NotesCard({ asset, lossToReview = null }: { asset: Asset; lossToReview?: number | null }) {
   const theme = useTheme();
   const { write } = useData();
   const [editing, setEditing] = useState(false);
@@ -103,6 +106,17 @@ export function NotesCard({ asset }: { asset: Asset }) {
         </Text>
       </View>
 
+      {lossToReview !== null && !due && (
+        <>
+          <View style={styles.review}>
+            <Ionicons name="trending-down" size={18} color={theme.negative} />
+            <Text style={{ color: theme.text, flex: 1, fontWeight: '600' }}>
+              Down {formatPercent(-lossToReview)} vs what you paid: still the plan?
+            </Text>
+          </View>
+          <Button title="Reviewed: look again in 3 months" onPress={() => save({ note: asset.note, reviewDate: addMonths(now, 3) })} />
+        </>
+      )}
       {due && (
         <Button
           title="Reviewed: next in 6 months"

@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { addMonths, today } from '@/domain/dates';
+import { computePosition } from '@/domain/positions';
 
 import { seedDefaultCategories } from './migrations';
 import * as repo from './repo';
@@ -8,7 +9,8 @@ import * as repo from './repo';
 /*
  * Development helper: a realistic, reproducible sample portfolio (~5 years of monthly history) that
  * exercises every screen: all default categories plus a custom one, gains and losses, partial and
- * full sells, dividends/interest, withdrawals, a closed and an archived position, and two loans.
+ * full sells, dividends/interest, withdrawals, a closed and an archived position, two loans (one
+ * with a scheduled monthly payment) and a scheduled monthly buy.
  */
 
 const MONTHS = 60;
@@ -147,6 +149,9 @@ export async function resetWithDemoData(db: SQLiteDatabase) {
   await trade(eth, 'BUY', 25, 0.8, ethPrices[25], 2);
   await trade(eth, 'SELL', 8, 0.5, ethPrices[8], 1);
   await monthlyPrices(eth, ethPrices, 46);
+  // Today's price: 32% under the average cost, for the "▼ −32%" big loss badge.
+  const ethTxs = (await repo.loadSnapshot(db)).transactions.filter((t) => t.assetId === eth);
+  await price(eth, 0, computePosition('units', ethTxs, []).avgCost! * 0.68);
 
   // Archived: hidden from lists unless "Show closed & archived" is on, still counted in totals.
   const dogePrices = pricePath(9, 0.25, -0.01, 0.15);
@@ -203,7 +208,7 @@ export async function resetWithDemoData(db: SQLiteDatabase) {
   // A loan tracked with Borrow / Repay operations instead of balance updates.
   const carLoan = await asset(home, 'Loan', 'Car loan', null);
   await cash(carLoan, 'DEPOSIT', 18, 15000, 'Borrowed');
-  for (let m = 15; m >= 0; m -= 3) await cash(carLoan, 'WITHDRAW', m, 750, 'Quarterly repayment');
+  for (let m = 15; m >= 3; m -= 3) await cash(carLoan, 'WITHDRAW', m, 750, 'Quarterly repayment');
 
   // --- Precious metals ----------------------------------------------------------
   const goldPrices = pricePath(14, 360, 0.012, 0.03);
@@ -264,6 +269,12 @@ export async function resetWithDemoData(db: SQLiteDatabase) {
       note: `Buy ${b.quantity} × Amundi MSCI World`,
     });
   }
+
+  // --- Scheduled operations: due now on Home (Review › save) ---------------------------
+  // Monthly payment at 4.5% since last month (two due, interest split), and a monthly ETF buy from checking.
+  const day = Math.min(Number(today().slice(8, 10)), 28);
+  await repo.insertSchedule(db, { assetId: carLoan, type: 'WITHDRAW', amount: 300, day, startDate: ago(1), cashAssetId: checking, rate: 0.045 });
+  await repo.insertSchedule(db, { assetId: cw8, type: 'BUY', amount: 400, day: 1, startDate: ago(2), cashAssetId: checking, rate: null });
 
   // --- Online prices: the last 3 monthly prices of these were fetched, not typed (history tag) ---
   await db.runAsync(`UPDATE prices SET source = 'online' WHERE asset_id IN (?, ?, ?) AND date >= ?`, [cw8, btc, eth, ago(2)]);

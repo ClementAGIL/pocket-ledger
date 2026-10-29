@@ -3,15 +3,18 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { StalenessIcon, stalenessColor } from '@/components/StalenessBadge';
 import { Button, Card, TextLink } from '@/components/ui';
-import { formatDate } from '@/domain/format';
+import { formatDate, formatPercent } from '@/domain/format';
 import type { AssetView } from '@/domain/portfolio';
 import type { SetupStep } from '@/domain/projection';
+import { bigLoss } from '@/domain/reviews';
 import { STALENESS_RANGES, type StalenessSummary } from '@/domain/staleness';
+import { useToday } from '@/state/DataProvider';
 import { space, useTheme } from '@/theme';
 
-/** Investments whose review date has come; each opens its page. */
+/** Investments whose review date has come or down 25% or more (`reviewsDue`); each opens its page. */
 export function ReviewReminder({ reviews, onOpen }: { reviews: AssetView[]; onOpen: (assetId: number) => void }) {
   const theme = useTheme();
+  const today = useToday();
   const shown = reviews.slice(0, 5);
   return (
     <Card style={[styles.reminder, { borderLeftColor: theme.staleWarning }]}>
@@ -35,7 +38,10 @@ export function ReviewReminder({ reviews, onOpen }: { reviews: AssetView[]; onOp
               {v.asset.name}
             </Text>
             <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-              {v.account.name} · due {formatDate(v.asset.reviewDate!)}
+              {v.account.name} ·{' '}
+              {v.asset.reviewDate && v.asset.reviewDate <= today
+                ? `due ${formatDate(v.asset.reviewDate)}`
+                : `down ${formatPercent(-(bigLoss(v) ?? 0))} vs what you paid`}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
@@ -74,6 +80,25 @@ export function UpdateReminder({ summary, onUpdate }: { summary: StalenessSummar
         ))}
       </View>
       <Button title="Update prices" onPress={onUpdate} />
+    </Card>
+  );
+}
+
+/** Scheduled operations due (`dueOccurrences`): opens the review screen. */
+export function ScheduledReminder({ count, onOpen }: { count: number; onOpen: () => void }) {
+  const theme = useTheme();
+  return (
+    <Card style={[styles.reminder, { borderLeftColor: theme.primary }]}>
+      <View style={styles.reminderHeader}>
+        <Ionicons name="repeat" size={22} color={theme.primary} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>
+            {count} scheduled {count > 1 ? 'operations' : 'operation'} due
+          </Text>
+          <Text style={{ color: theme.textSecondary, fontSize: 13 }}>Check the amounts, then save them in one go.</Text>
+        </View>
+      </View>
+      <Button title="Review" onPress={onOpen} />
     </Card>
   );
 }

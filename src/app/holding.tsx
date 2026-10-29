@@ -7,13 +7,13 @@ import { AnnualizedReturn } from '@/components/AnnualizedReturn';
 import { EntryLine, newestFirst, type Entry } from '@/components/asset/EntryLine';
 import { HistoryChart } from '@/components/HistoryChart';
 import { PeriodSelector } from '@/components/PeriodSelector';
-import { StalenessBadge } from '@/components/StalenessBadge';
+import { LossBadge, StalenessBadge } from '@/components/StalenessBadge';
 import { Card, Money, Percent, Row, SectionTitle, TextLink } from '@/components/ui';
 import { formatNumber } from '@/domain/format';
 import { buildHistory, chartMarks, downsample, sliceHistory } from '@/domain/history';
 import { accountsLabel, findHolding, holdingPerformance } from '@/domain/holdings';
 import { PERIOD_LABELS } from '@/domain/performance';
-import { isReviewDue } from '@/domain/reviews';
+import { bigLoss, isReviewDue } from '@/domain/reviews';
 import { needsTracking } from '@/domain/staleness';
 import { useEntryActions } from '@/hooks/useEntryActions';
 import { useMoney } from '@/hooks/useMoney';
@@ -145,6 +145,7 @@ export default function HoldingScreen() {
                           <Text style={{ color: theme.textSecondary, fontSize: 12 }}>Review</Text>
                         </View>
                       )}
+                      {bigLoss(v) !== null && <LossBadge loss={bigLoss(v)!} />}
                       {needsTracking(v) && <StalenessBadge priceDate={v.position.priceDate} frequency={category.updateReminder} />}
                       <Text style={{ color: theme.textMuted, fontSize: 12, flexShrink: 1 }} numberOfLines={1}>
                         {[

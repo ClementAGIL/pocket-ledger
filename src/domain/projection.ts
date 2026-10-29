@@ -1,5 +1,6 @@
-import { addMonths } from './dates';
+import { addMonths, dayNumber } from './dates';
 import { DEFAULT_EMERGENCY_MONTHS, EMERGENCY_MONTHS } from './emergency';
+import type { Period } from './performance';
 import { exceptionalLimit, firstMonth, monthlySavings, monthOf } from './savings';
 import type { ISODate, Snapshot } from './types';
 
@@ -45,15 +46,46 @@ function simulate({ start, yearlySaving, rate }: Plan, visit: (p: ProjectionPoin
   }
 }
 
-/** One point per year, from today (year 0) to `years`. */
-export function project(plan: Plan, years: number): ProjectionPoint[] {
+/** One point every `every` months, from today (month 0) to `months`. */
+function projectEvery(plan: Plan, months: number, every: number): ProjectionPoint[] {
   const start = Math.max(plan.start, 0);
   const points: ProjectionPoint[] = [{ month: 0, value: start, contributed: start }];
+  if (months <= 0) return points;
   simulate(plan, (p) => {
-    if (p.month % 12 === 0) points.push(p);
-    return p.month >= years * 12;
+    if (p.month % every === 0) points.push(p);
+    return p.month >= months;
   });
   return points;
+}
+
+/** One point per year, from today (year 0) to `years`. */
+export const project = (plan: Plan, years: number) => projectEvery(plan, years * 12, 12);
+
+/** One point per month, from today (month 0) to `months`: the Home chart's projection. */
+export const projectMonths = (plan: Plan, months: number) => projectEvery(plan, months, 1);
+
+/**
+ * How far the Home chart projects: as long as the period shown, so the past and the future get
+ * comparable room on its time axis. MTD 1 month, YTD and 12M 12 months, ALL the length of the
+ * history (`first` = its first date), at least 1 month.
+ */
+export function chartProjectionMonths(period: Period, first: ISODate | null, today: ISODate): number {
+  if (period === 'MTD') return 1;
+  if (period !== 'ALL') return 12;
+  if (!first) return 12;
+  const months = Math.round((dayNumber(today) - dayNumber(first)) / DAYS_PER_MONTH);
+  return Math.min(Math.max(months, 1), MAX_YEARS * 12);
+}
+
+const DAYS_PER_MONTH = 365.25 / 12;
+
+/**
+ * The Goals plan (rate and saving chosen there) in future euros, without inflation: what the Home
+ * chart projects next to the real values. `mine` = the annualized return when meaningful, `pace` =
+ * `savingPace().yearly`.
+ */
+export function nominalPlan(s: ProjectionSettings, start: number, mine: number | null, pace: number): Plan {
+  return { start, yearlySaving: s.saving === 'mine' ? pace : s.customSaving, rate: rateOf(s, mine) };
 }
 
 /** Months until the value reaches `target`: 0 when already there, null when not within MAX_YEARS. */
@@ -191,6 +223,9 @@ export function inflationOf(s: ProjectionSettings): number {
 
 /** Growth in purchasing power: 7% a year with 2% inflation is ≈ 4.9% a year in today's euros. */
 export const realRate = (rate: number, inflation: number) => (1 + rate) / (1 + inflation) - 1;
+
+/** Years for money to double at a yearly rate (7.4% → ≈ 9.7 years); null when it never does (rate ≤ 0). */
+export const doublingYears = (rate: number) => (rate > 0 ? Math.log(2) / Math.log1p(rate) : null);
 
 /** The goal in €, or null when none is set. */
 export function goalOf(s: ProjectionSettings): number | null {

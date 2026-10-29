@@ -123,7 +123,13 @@ export function assetPerformance(
       p.startValue = s.value;
     }
   }
-  p.endValue = steps.length ? steps[steps.length - 1].value : 0;
+  // Value at the end of `end` (the latest state when `end` is today).
+  for (let i = steps.length - 1; i >= 0; i--) {
+    if (steps[i].lastDate! <= end) {
+      p.endValue = steps[i].value;
+      break;
+    }
+  }
 
   const startDay = start ? dayNumber(start) : 0;
   const endDay = dayNumber(end);
@@ -186,7 +192,15 @@ export interface PortfolioPerformance {
 }
 
 export function buildPerformance(portfolio: Portfolio, period: Period, today: ISODate): PortfolioPerformance {
-  const start = periodStart(period, today);
+  return { period, ...performanceBetween(portfolio, periodStart(period, today), today) };
+}
+
+/** Performance from `start` (null = since the first event) to the end of `today`, which may be a past day (a past month). */
+export function performanceBetween(
+  portfolio: Portfolio,
+  start: ISODate | null,
+  today: ISODate,
+): Omit<PortfolioPerformance, 'period'> {
   const sinceStart = start === null;
 
   const byAsset = new Map<number, Performance>();
@@ -229,5 +243,5 @@ export function buildPerformance(portfolio: Portfolio, period: Period, today: IS
   }
   const byAccount = new Map([...perAccount].map(([id, views]) => [id, groupPerformance(views)]));
 
-  return { period, start, total, byCategory, byAccount, byAsset };
+  return { start, total, byCategory, byAccount, byAsset };
 }

@@ -1,8 +1,8 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { addMonths } from '@/domain/dates';
-import { formatDuration, formatPercent } from '@/domain/format';
-import { HORIZONS, MAX_YEARS, monthsToReach, project, type Plan, type ProjectionSettings } from '@/domain/projection';
+import { formatDuration, formatNumber, formatPercent } from '@/domain/format';
+import { doublingYears, HORIZONS, MAX_YEARS, monthsToReach, project, type Plan, type ProjectionSettings } from '@/domain/projection';
 import { monthOf } from '@/domain/savings';
 import { useMoney } from '@/hooks/useMoney';
 import { useToday } from '@/state/DataProvider';
@@ -46,6 +46,13 @@ export function ProjectionCard({
   }));
   const assumptions = `At ${formatPercent(rate)}/yr${inflation > 0 ? ` (${formatPercent(plan.rate)} after inflation)` : ''} and ${money(plan.yearlySaving, { signed: plan.yearlySaving < 0 })}/yr`;
   const todayMoney = inflation > 0 ? ' in today’s money' : '';
+  // Rule of thumb for the rate: nominal, and in purchasing power when inflation is on.
+  const years = (r: number) => {
+    const y = doublingYears(r);
+    return y === null ? null : `~${formatNumber(Math.round(y * 10) / 10)} years`;
+  };
+  const doubles = years(rate);
+  const doublesReal = inflation > 0 ? years(plan.rate) : null;
 
   return (
     <Card style={{ gap: space.md }}>
@@ -103,6 +110,12 @@ export function ProjectionCard({
           </Text>
         </Row>
       </View>
+      {doubles && (
+        <Text style={{ color: theme.textSecondary }}>
+          At {formatPercent(rate)}/yr, your money doubles every {doubles}
+          {inflation > 0 ? (doublesReal ? ` (${doublesReal} in today’s money)` : ' (but not in today’s money)') : ''}.
+        </Text>
+      )}
     </Card>
   );
 }

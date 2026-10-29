@@ -2,7 +2,8 @@ import { today } from '@/domain/dates';
 import { buildPortfolio } from '@/domain/portfolio';
 import { monthsToReach, savingPace } from '@/domain/projection';
 import { buildReturns } from '@/domain/returns';
-import { reviewsDue } from '@/domain/reviews';
+import { bigLoss, reviewsDue } from '@/domain/reviews';
+import { dueOccurrences } from '@/domain/schedules';
 
 import { resetWithDemoData } from '../demo';
 import { migrate } from '../migrations';
@@ -36,6 +37,14 @@ describe('demo data (real migrations + repository on SQLite)', () => {
     const online = snapshot.prices.filter((p) => p.source === 'online');
     expect(online.length).toBe(9);
     expect(snapshot.prices.some((p) => p.source === 'manual')).toBe(true);
+
+    // Big losses: Ethereum shows "▼ −32%" (Peloton is far lower).
+    const views = buildPortfolio(snapshot).byAssetId;
+    expect(bigLoss(views.get(snapshot.assets.find((a) => a.name === 'Ethereum')!.id)!)).toBeCloseTo(-0.32, 3);
+
+    // Scheduled operations: a loan payment and a monthly buy are due.
+    const scheduled = dueOccurrences(snapshot.schedules, buildPortfolio(snapshot).byAssetId, today());
+    expect(new Set(scheduled.map((o) => o.view.asset.name))).toEqual(new Set(['Car loan', 'Amundi MSCI World']));
 
     // Target allocation adds up to 100%.
     const targets = snapshot.categories.filter((c) => c.targetWeight !== null);

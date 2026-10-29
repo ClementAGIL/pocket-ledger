@@ -5,6 +5,7 @@ import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native
 
 import { AnnualizedReturn } from '@/components/AnnualizedReturn';
 import { EditAsset } from '@/components/asset/EditAsset';
+import { ScheduleCard } from '@/components/asset/ScheduleCard';
 import { EntryLine, newestFirst, type Entry } from '@/components/asset/EntryLine';
 import { HistoryChart } from '@/components/HistoryChart';
 import { NotesCard } from '@/components/NotesCard';
@@ -12,10 +13,10 @@ import { PeriodSelector } from '@/components/PeriodSelector';
 import { StalenessBadge } from '@/components/StalenessBadge';
 import { Button, Card, Money, Percent, Row, SectionTitle, TextLink } from '@/components/ui';
 import * as repo from '@/db/repo';
-import { formatDate, formatNumber } from '@/domain/format';
+import { formatDate, formatNumber, formatPercent } from '@/domain/format';
 import { chartMarks, downsample, sliceHistory } from '@/domain/history';
 import { PERIOD_LABELS } from '@/domain/performance';
-import { isReviewDue } from '@/domain/reviews';
+import { bigLoss, isReviewDue, reviewReason } from '@/domain/reviews';
 import { useEntryActions } from '@/hooks/useEntryActions';
 import { useMoney } from '@/hooks/useMoney';
 import { useData, useToday } from '@/state/DataProvider';
@@ -26,7 +27,7 @@ export default function AssetScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
   const now = useToday();
-  const { portfolio, performance, returns, write } = useData();
+  const { portfolio, performance, returns, snapshot, write } = useData();
   const { money, hidden } = useMoney();
   const { linkLabel, openEntry, deleteEntry } = useEntryActions();
   const showUndo = useUndo();
@@ -75,11 +76,19 @@ export default function AssetScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          const deleted = { asset, transactions: [...assetTxs], prices: [...assetPrices] };
+          const deleted = {
+            asset,
+            transactions: [...assetTxs],
+            prices: [...assetPrices],
+            schedules: {
+              own: snapshot.schedules.filter((x) => x.assetId === asset.id),
+              paidFrom: snapshot.schedules.filter((x) => x.cashAssetId === asset.id).map((x) => x.id),
+            },
+          };
           router.back();
           await write((txn) => repo.deleteAsset(txn, asset.id));
           showUndo(`${asset.name} deleted`, () =>
-            write((txn) => repo.restoreAsset(txn, deleted.asset, deleted.transactions, deleted.prices)),
+            write((txn) => repo.restoreAsset(txn, deleted.asset, deleted.transactions, deleted.prices, deleted.schedules)),
           );
         },
       },
@@ -115,6 +124,15 @@ export default function AssetScreen() {
                 <Money value={perf.gain} signed colored style={{ fontSize: 16, fontWeight: '600' }} />
                 <Percent ratio={perf.pct} style={{ fontSize: 16, fontWeight: '600' }} />
                 <Text style={{ color: theme.textMuted }}>{PERIOD_LABELS[performance.period].toLowerCase()}</Text>
+              </View>
+            )}
+            {bigLoss(view) !== null && !editing && (
+              <View style={styles.dueBadge}>
+                <Ionicons name="trending-down" size={14} color={theme.negative} />
+                <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
+                  Down {formatPercent(-bigLoss(view)!)} vs what you paid
+                  {reviewReason(view, now) === 'loss' ? ': see Notes below' : ''}
+                </Text>
               </View>
             )}
             {isReviewDue(asset, now) && !editing && (
@@ -191,8 +209,10 @@ export default function AssetScreen() {
                   )}
                 </Card>
 
+                <ScheduleCard view={view} />
+
                 <SectionTitle>Notes</SectionTitle>
-                <NotesCard key={`${asset.id}-${asset.note}-${asset.reviewDate}`} asset={asset} />
+                <NotesCard key={`${asset.id}-${asset.note}-${asset.reviewDate}`} asset={asset} lossToReview={reviewReason(view, now) === 'loss' ? bigLoss(view) : null} />
 
                 <View style={styles.historyTitle}>
                   <SectionTitle>History</SectionTitle>

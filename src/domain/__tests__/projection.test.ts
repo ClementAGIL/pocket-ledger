@@ -1,12 +1,16 @@
 import {
+  chartProjectionMonths,
   DEFAULT_PROJECTION,
+  doublingYears,
   fireTarget,
   goalOf,
   inflationOf,
   missingSetup,
   monthsToReach,
+  nominalPlan,
   parseProjectionSettings,
   project,
+  projectMonths,
   rateOf,
   realRate,
   savingPace,
@@ -107,6 +111,7 @@ describe('savingPace', () => {
     note: null,
   });
   const base: Omit<Snapshot, 'transactions'> = {
+    schedules: [],
     categories: [
       { id: 1, name: 'Cash', kind: 'asset', valuation: 'balance', color: '#000', sortOrder: 0, isDefault: true, targetWeight: null, updateReminder: 'monthly' },
       { id: 2, name: 'Loan', kind: 'liability', valuation: 'balance', color: '#000', sortOrder: 1, isDefault: true, targetWeight: null, updateReminder: 'monthly' },
@@ -165,5 +170,58 @@ describe('missingSetup', () => {
   it('expenses set the fund up; with FIRE they are the goal too', () => {
     expect(missingSetup({ ...DEFAULT_PROJECTION, goalMode: 'amount', goalAmount: 0, yearlySpending: 30000 })).toEqual(['goal']);
     expect(missingSetup({ ...DEFAULT_PROJECTION, goalMode: 'fire', yearlySpending: 30000 })).toEqual([]);
+  });
+});
+
+describe('projectMonths', () => {
+  it('gives one point per month and ends where the yearly projection does', () => {
+    const plan = { start: 1000, yearlySaving: 1200, rate: 0.06 };
+    const months = projectMonths(plan, 24);
+    expect(months.map((p) => p.month)).toEqual(Array.from({ length: 25 }, (_, i) => i));
+    expect(months[24].value).toBeCloseTo(project(plan, 2)[2].value, 9);
+    expect(months[1].contributed).toBeCloseTo(1100, 9);
+  });
+
+  it('is only today for 0 months', () => {
+    expect(projectMonths({ start: 500, yearlySaving: 0, rate: 0.05 }, 0)).toEqual([{ month: 0, value: 500, contributed: 500 }]);
+  });
+});
+
+describe('chartProjectionMonths', () => {
+  it('projects as long as the period shown', () => {
+    expect(chartProjectionMonths('MTD', '2020-01-01', '2026-10-29')).toBe(1);
+    expect(chartProjectionMonths('YTD', '2020-01-01', '2026-10-29')).toBe(12);
+    expect(chartProjectionMonths('12M', '2020-01-01', '2026-10-29')).toBe(12);
+    // ALL: the length of the history, 6 years here.
+    expect(chartProjectionMonths('ALL', '2020-10-29', '2026-10-29')).toBe(72);
+  });
+
+  it('projects at least a month, at most MAX_YEARS', () => {
+    expect(chartProjectionMonths('ALL', '2026-10-28', '2026-10-29')).toBe(1);
+    expect(chartProjectionMonths('ALL', '1900-01-01', '2026-10-29')).toBe(1200);
+    expect(chartProjectionMonths('ALL', null, '2026-10-29')).toBe(12);
+  });
+});
+
+describe('nominalPlan', () => {
+  it('uses the Goals rate and saving, without inflation', () => {
+    const s = { ...DEFAULT_PROJECTION, inflation: '3' as const };
+    expect(nominalPlan(s, 1000, 0.08, 6000)).toEqual({ start: 1000, yearlySaving: 6000, rate: 0.08 });
+    // No annualized return yet: 7%, like Goals.
+    expect(nominalPlan(s, 1000, null, 6000).rate).toBe(0.07);
+    expect(nominalPlan({ ...s, rate: '4', saving: 'custom', customSaving: -1200 }, 1000, 0.08, 6000)).toEqual({
+      start: 1000,
+      yearlySaving: -1200,
+      rate: 0.04,
+    });
+  });
+});
+
+describe('doublingYears', () => {
+  it('is the time for money to double at the rate', () => {
+    expect(doublingYears(0.074)).toBeCloseTo(9.71, 2);
+    expect(doublingYears(1)).toBeCloseTo(1, 9);
+    expect(doublingYears(0)).toBeNull();
+    expect(doublingYears(-0.02)).toBeNull();
   });
 });

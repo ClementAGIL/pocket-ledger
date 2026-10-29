@@ -16,6 +16,8 @@ export interface ChartPoint {
   invested?: number;
   /** Optional dashed comparison line ("what if"). */
   benchmark?: number;
+  /** A projection after the last real point: drawn dashed, after the real ones. */
+  projected?: boolean;
 }
 
 const HEIGHT = 180;
@@ -75,14 +77,27 @@ export function HistoryChart({
   const x = (i: number) => (points.length === 1 ? width : ((xs[i] - xMin) / (xMax - xMin)) * width);
   const y = (v: number) => PAD_TOP + (1 - (v - yMin) / (yMax - yMin)) * (HEIGHT - PAD_TOP - PAD_BOTTOM);
 
-  const linePath = (get: (p: ChartPoint) => number) => {
-    if (points.length === 1) return `M0,${y(get(points[0]))} L${width},${y(get(points[0]))}`;
-    return points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(get(p)).toFixed(1)}`).join(' ');
+  // Real points, then the projected ones (dashed, starting from the last real point).
+  const firstProjected = points.findIndex((p) => p.projected);
+  const lastReal = firstProjected === -1 ? points.length - 1 : Math.max(firstProjected - 1, 0);
+  const end = points.length - 1;
+
+  /** Path through points `from`..`to`, skipping those without a value. */
+  const linePath = (get: (p: ChartPoint) => number | undefined, from = 0, to = end) => {
+    if (points.length === 1) return `M0,${y(get(points[0]) ?? 0)} L${width},${y(get(points[0]) ?? 0)}`;
+    const parts: string[] = [];
+    for (let i = from; i <= to; i++) {
+      const v = get(points[i]);
+      if (v !== undefined) parts.push(`${parts.length ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+    }
+    return parts.join(' ');
   };
-  const valuePath = linePath((p) => p.value);
-  const areaPath = `${valuePath} L${width},${y(yMin)} L0,${y(yMin)} Z`;
-  const investedPath = hasInvested ? linePath((p) => p.invested ?? 0) : null;
-  const benchmarkPath = hasBenchmark ? linePath((p) => p.benchmark ?? 0) : null;
+  const valuePath = linePath((p) => p.value, 0, lastReal);
+  const areaPath = `${valuePath} L${x(lastReal)},${y(yMin)} L0,${y(yMin)} Z`;
+  const investedPath = hasInvested ? linePath((p) => p.invested, 0, lastReal) : null;
+  const benchmarkPath = hasBenchmark ? linePath((p) => p.benchmark) : null;
+  const projectedValuePath = firstProjected > 0 ? linePath((p) => p.value, lastReal) : null;
+  const projectedInvestedPath = firstProjected > 0 && hasInvested ? linePath((p) => p.invested, lastReal) : null;
 
   const pick = (e: GestureResponderEvent) => {
     const touchX = e.nativeEvent.locationX;
@@ -125,7 +140,10 @@ export function HistoryChart({
     <View>
       {/* Legend doubles as the tooltip: it shows the touched point, or the latest one. */}
       <View style={styles.legend}>
-        <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{formatDate(shown.date)}</Text>
+        <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+          {formatDate(shown.date)}
+          {shown.projected ? ' · projected' : ''}
+        </Text>
         <View style={styles.legendItems}>
           <LegendItem color={theme.seriesValue} label={valueLabel} value={formatEuro(shown.value, { hidden, rounded: true })} />
           {hasInvested && (
@@ -135,7 +153,8 @@ export function HistoryChart({
               value={formatEuro(shown.invested ?? 0, { hidden, rounded: true })}
             />
           )}
-          {hasBenchmark && (
+          {/* No comparison value on projected points. */}
+          {hasBenchmark && shown.benchmark !== undefined && (
             <LegendItem
               dashed
               color={theme.seriesBenchmark}
@@ -180,6 +199,13 @@ export function HistoryChart({
             {investedPath && (
               <Path d={investedPath} stroke={theme.seriesInvested} strokeWidth={2} fill="none" strokeLinejoin="round" />
             )}
+            {projectedInvestedPath && (
+              <Path d={projectedInvestedPath} stroke={theme.seriesInvested} strokeWidth={2} strokeDasharray="6 4" fill="none" strokeLinejoin="round" />
+            )}
+            {/* Today: where the real values stop and the projection starts. */}
+            {firstProjected > 0 && (
+              <Line x1={x(lastReal)} x2={x(lastReal)} y1={0} y2={HEIGHT} stroke={theme.textMuted} strokeWidth={1} strokeDasharray="2 3" />
+            )}
             {benchmarkPath && (
               <Path
                 d={benchmarkPath}
@@ -191,6 +217,9 @@ export function HistoryChart({
               />
             )}
             <Path d={valuePath} stroke={theme.seriesValue} strokeWidth={2} fill="none" strokeLinejoin="round" />
+            {projectedValuePath && (
+              <Path d={projectedValuePath} stroke={theme.seriesValue} strokeWidth={2} strokeDasharray="6 4" fill="none" strokeLinejoin="round" />
+            )}
             {[...buckets.values()].map((b) => {
               const cy = HEIGHT + 4 + lanes.indexOf(b.kind) * LANE + LANE / 2;
               return <MarkShape key={`${b.kind}${b.x}`} kind={b.kind} x={b.x} y={cy} r={b.count > 1 ? 5 : 3.5} color={markColor(theme, b.kind)} />;

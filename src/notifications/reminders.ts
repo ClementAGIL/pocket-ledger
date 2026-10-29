@@ -34,12 +34,13 @@ export function loadNotifications(): Notifications | null {
 export const notificationsAvailable = () => loadNotifications() !== null;
 
 const CHANNEL_ID = 'reminders';
-/** Screen opened when the notification is tapped. */
-export const REMINDER_URL = '/update-prices';
+/** Screen opened when the notification is tapped: the check-in leads on to the prices to update. */
+export const REMINDER_URL = '/checkin';
 
+// Shown on the lock screen: never an amount.
 const CONTENT = {
-  title: 'Time to update your portfolio',
-  body: "Update your prices and record this month's investments.",
+  title: 'Your monthly check-in is ready',
+  body: 'See how last month went, then update your prices.',
   data: { url: REMINDER_URL },
 };
 

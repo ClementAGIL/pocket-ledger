@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { useToday } from '@/state/DataProvider';
+import { formatPercent } from '@/domain/format';
 import { ageLabel, stalenessOf, type Staleness } from '@/domain/staleness';
 import type { ISODate, UpdateFrequency } from '@/domain/types';
 import { useTheme, type Theme } from '@/theme';
@@ -53,4 +54,16 @@ export function StalenessBadge({ priceDate, frequency }: { priceDate: ISODate | 
 const styles = StyleSheet.create({
   badge: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   label: { fontSize: 12, fontVariant: ['tabular-nums'] },
+  loss: { flexDirection: 'row', alignItems: 'center', gap: 3 },
 });
+
+/** "▼ −32%": an open investment down 25% or more vs what was paid (`bigLoss`). Icon + label, not only color. */
+export function LossBadge({ loss }: { loss: number }) {
+  const theme = useTheme();
+  return (
+    <View style={styles.loss} accessible accessibilityLabel={`Down ${formatPercent(-loss)} vs cost`}>
+      <Ionicons name="trending-down" size={12} color={theme.negative} />
+      <Text style={{ color: theme.negative, fontSize: 12, fontWeight: '600' }}>{formatPercent(loss, { signed: true })}</Text>
+    </View>
+  );
+}

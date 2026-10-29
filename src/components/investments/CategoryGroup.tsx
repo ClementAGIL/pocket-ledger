@@ -3,13 +3,13 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { StalenessBadge, StalenessIcon } from '@/components/StalenessBadge';
+import { LossBadge, StalenessBadge, StalenessIcon } from '@/components/StalenessBadge';
 import { Card, Money, Percent, Stat } from '@/components/ui';
 import { formatNumber, formatPercent } from '@/domain/format';
 import { accountsLabel, holdingPerformance, type Holding, type ListRow } from '@/domain/holdings';
 import { combine } from '@/domain/performance';
 import type { AssetView, CategoryGroup } from '@/domain/portfolio';
-import { isReviewDue, reviewsDue } from '@/domain/reviews';
+import { BIG_LOSS, bigLoss, isReviewDue, reviewsDue } from '@/domain/reviews';
 import { needsTracking, summarizeStaleness } from '@/domain/staleness';
 import { useData, useToday } from '@/state/DataProvider';
 import { space, useTheme } from '@/theme';
@@ -131,6 +131,8 @@ function HoldingRow({ holding }: { holding: Holding }) {
     null,
   );
   const reviewDue = tracked.some((v) => isReviewDue(v.asset, now));
+  // On the summed position: what the product as a whole lost vs what was paid.
+  const loss = tracked.length && p.unrealizedPct !== null && p.unrealizedPct <= BIG_LOSS ? p.unrealizedPct : null;
   return (
     <View style={[styles.holding, { borderColor: theme.border }]}>
       <Pressable
@@ -149,6 +151,7 @@ function HoldingRow({ holding }: { holding: Holding }) {
                 <Text style={{ color: theme.textSecondary, fontSize: 12 }}>Review</Text>
               </View>
             )}
+            {loss !== null && <LossBadge loss={loss} />}
             {oldest && <StalenessBadge priceDate={oldest.position.priceDate} frequency={oldest.category.updateReminder} />}
             <Text style={{ color: theme.textMuted, fontSize: 12, flexShrink: 1 }} numberOfLines={1}>
               {[
@@ -195,6 +198,7 @@ function AssetRow({ view, showAccount }: { view: AssetView; showAccount: boolean
   const { performance } = useData();
   const perf = performance.byAsset.get(view.asset.id);
   const { asset, account, position: p, isLiability } = view;
+  const loss = bigLoss(view);
   const details =
     asset.valuation === 'units' && p.quantity > 0
       ? `${formatNumber(p.quantity)} × ${formatNumber(p.price ?? 0, 4)} €`
@@ -216,6 +220,7 @@ function AssetRow({ view, showAccount }: { view: AssetView; showAccount: boolean
               <Text style={{ color: theme.textSecondary, fontSize: 12 }}>Review</Text>
             </View>
           )}
+          {loss !== null && <LossBadge loss={loss} />}
           {needsTracking(view) && <StalenessBadge priceDate={p.priceDate} frequency={view.category.updateReminder} />}
           <Text style={{ color: theme.textMuted, fontSize: 12, flexShrink: 1 }} numberOfLines={1}>
             {[showAccount ? account.name : null, details, p.avgCost !== null ? `avg ${formatNumber(p.avgCost, 4)} €` : null]

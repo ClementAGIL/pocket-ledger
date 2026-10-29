@@ -33,6 +33,12 @@ export interface Settings {
   onlinePricesEnabled: boolean;
   /** "Don't remind me" on the Home reminder to set a goal and an emergency fund. */
   setupReminderDismissed: boolean;
+  /** Home chart: "With projection", the Goals plan drawn after today. Off by default. */
+  chartProjection: boolean;
+  /** Last month whose check-in was opened (YYYY-MM): the Home check-in card hides until the next one. */
+  checkInSeen: string;
+  /** Milestones already celebrated (`Milestone.key`): each goal is celebrated once. Stored as JSON. */
+  celebratedGoals: string[];
   /** Insights › Goals choices (rate, saving, goal, horizon). Stored as JSON. */
   projection: ProjectionSettings;
 }
@@ -65,6 +71,15 @@ interface DataContextValue {
 
 const DataContext = createContext<DataContextValue | null>(null);
 
+const parseStringList = (raw: string | undefined): string[] => {
+  try {
+    const v: unknown = JSON.parse(raw ?? '[]');
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
 const parseSettings = (raw: Record<string, string>): Settings => ({
   hideAmounts: raw.hideAmounts === '1',
   lockEnabled: raw.lockEnabled === '1',
@@ -77,6 +92,9 @@ const parseSettings = (raw: Record<string, string>): Settings => ({
   autoBackupKeep: intSetting(raw.autoBackupKeep, 1, 100, 10),
   onlinePricesEnabled: raw.onlinePricesEnabled === '1',
   setupReminderDismissed: raw.setupReminderDismissed === '1',
+  chartProjection: raw.chartProjection === '1',
+  checkInSeen: raw.checkInSeen ?? '',
+  celebratedGoals: parseStringList(raw.celebratedGoals),
   projection: parseProjectionSettings(raw.projection),
 });
 

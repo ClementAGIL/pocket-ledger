@@ -82,6 +82,14 @@ export function GoalCard({
             <Text style={{ color: theme.text, fontSize: 13, fontWeight: '600' }}>{formatPercent(progress)}</Text>
           </View>
           <ProgressBar progress={progress} color={theme.primary} />
+          {s.goalMode === 'fire' && (
+            // What today's assets could already pay for under the same 4% rule.
+            <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
+              With your current investments ({money(start)}), you can cover{' '}
+              <Text style={{ color: theme.text, fontWeight: '600' }}>{money(Math.max(start, 0) * FIRE_WITHDRAWAL_RATE)}</Text> of yearly
+              spending ({money((Math.max(start, 0) * FIRE_WITHDRAWAL_RATE) / 12)}/month).
+            </Text>
+          )}
         </View>
       )}
     </Card>

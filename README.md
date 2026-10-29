@@ -20,17 +20,22 @@ Built with Expo (SDK 57) and React Native; it runs in **Expo Go**.
 
 ## Features
 
+On the first start, a short animated introduction presents the app (and offers to turn on the lock or to explore the demo); **Settings › Help** shows it again.
+
 ### Portfolio (home)
 - **Net worth** (assets − debts) and your **gain** in € and % for the selected period.
 - **Goals card:** progress towards your goal (or FIRE number) and your emergency fund ("Covered · 112%"). Tap a line to open Insights › Goals or Savings.
+- **Celebrations:** when an operation or a price update takes you past your goal (or FIRE number), or completes your emergency fund, confetti and a trophy celebrate it (once per goal). The monthly check-in also shows a "Goal reached" card, with confetti, for the month it happened.
 - **Period selector** (Month · Year · 12M · All). It applies across the whole app.
 - **History chart:**
   - *Net worth* view (when you have debts), or *Investments* view: asset value vs **money put in** (deposits minus withdrawals: it only moves when money comes in or goes out, so dividends, even paid into a cash account, and gains show as the gap above it);
   - an optional dashed **"what if" line**: where your money would be at 4%/yr (or 2–7%), to check whether you beat a savings account or a bond.
+  - **With projection** (switch under the chart, off by default): the lines continue dashed after today, using the rate and yearly saving chosen in Goals (in future euros, debts unchanged), for as long as the period shown: 1 month on MTD, 12 months on YTD / 12M, and as long as your history on ALL.
 - **Performance card:** value at the start of the period, money added, value today, and a **gain breakdown**: price gains · dividends · interest.
+- **Monthly check-in:** one month at a glance: its gain (with the breakdown), what you saved (put in, taken out, loans), the 3 biggest gainers and losers; then what to do now: investments down 25% or more, prices to update, reviews due. It opens on last month, with ‹ › to go back and the current month "so far". During the first 10 days of a month a Home card says it's ready (until you open it); you can open it any time from the calendar icon at the top of Home, under the Performance card or in the reminders window, and the monthly notification opens it.
 - **Today card:** assets, invested, unrealized and realized gains, debts, your **real annualized return** since the start (e.g. "▲ 7.4%/yr vs 4%"), and how far ahead or behind the comparison rate you are.
 - **Header icons:**
-  - **reminders:** prices to update (colored by age), investments due for review, and a nudge to set a goal and an emergency fund (until set, or "Don't remind me");
+  - **reminders:** prices to update (colored by age), investments to review (review date reached, or down 25% or more), scheduled operations due, and a nudge to set a goal and an emergency fund (until set, or "Don't remind me");
   - **sync (⟳):** fetch prices online. Grayed while the feature is off: tapping it explains what it does and offers to turn it on;
   - **eye:** hide amounts; **gear:** settings.
 
@@ -40,7 +45,8 @@ Built with Expo (SDK 57) and React Native; it runs in **Expo Go**.
   - **sortable** by value, invested, gain € or gain %;
   - each line shows its account, quantity × price, average cost and period gain;
   - **the same product in several accounts is one line** (same identifier, e.g. the ISIN, in the same category): "Intel · 2 accounts · 80.9 · avg 41 €", with summed value and gains. The arrow shows the line of each account; tapping the line opens a combined page (one chart, summed position and annualized return, one history with the account of each entry). The By account view keeps them apart;
-  - badges show **outdated prices** (gray 1 month · yellow 2–3 · orange 4–6 · red 6+) and **reviews due**;
+  - badges show **outdated prices** (gray 1 month · yellow 2–3 · orange 4–6 · red 6+), **reviews due** and **big losses** (▼ −25% or worse vs what you paid, for as long as it lasts);
+  - a big loss also appears in the reminders under "to review", until you press "Reviewed: look again in 3 months" on the investment page (it sets the review date);
   - each category sets how often to remind you: **monthly**, **yearly** (e.g. a retirement plan) or **never** (real estate, by default).
 - **Allocation view:** donut chart by category, account or investment (up to 8 segments + "Other"; the same product in several accounts counts once), with the full table underneath.
 - **Update prices** (header link).
@@ -68,8 +74,8 @@ Three sections, switched at the top.
 - While editing, the **Cash** row suggests a target from your emergency fund (e.g. 6 months of expenses ≈ 9%), with a one-tap "Use 9%".
 
 **Goals** (a simulation)
-- **Goal:** an amount, or **FIRE**: enter your yearly spending, the target is 25× it (the "4% rule"). A progress bar shows where you are today.
-- *"At 7.0%/yr (4.9% after inflation) and 12 000 €/yr, you'll reach 750 000 € in today's money in June 2041"*, with a chart of the projected value vs the money you put in, over 10, 20 or 30 years.
+- **Goal:** an amount, or **FIRE**: enter your yearly spending, the target is 25× it (the "4% rule"). A progress bar shows where you are today. With FIRE, it also says how much yearly spending your current investments could already cover.
+- *"At 7.0%/yr (4.9% after inflation) and 12 000 €/yr, you'll reach 750 000 € in today's money in June 2041"*, with a chart of the projected value vs the money you put in, over 10, 20 or 30 years. Underneath: *"At 7.4%/yr, your money doubles every ~9.7 years (~13.4 years in today's money)"*.
 - **Growth rate:** yours (your real annualized return), 4%, 7%, 10% or custom.
 - **Inflation** (Off · 2% · 3% · custom, 2% by default): amounts are in **today's euros**, so a FIRE number is compared with what your spending costs now.
 - **Yearly saving:** your current pace (average of the last 12 months, exceptional months left out) or a custom amount.
@@ -92,6 +98,7 @@ Three sections, switched at the top.
   - Moving money between your own accounts doesn't count as money added or saved.
 - **"Current position" card** before you start, and a **live preview** of the impact before saving: quantity, average cost, invested, value, gains. The preview always matches what you'll see once saved.
 - **Loans, repay by new balance:** enter today's balance, tick "Paid every month" and the payment day, and the app creates one repayment per month since the last update.
+- **Scheduled operations** (on the investment page): a monthly buy, deposit, withdrawal or loan payment, optionally paid from a cash account. Nothing is added on its own: when one is due, the Home reminders say "N scheduled operations due", and one screen lists them (missed months included) with the amount, the price of the day for a buy and the interest for a loan, ready to adjust. Untick a line to skip it, then Save all at once (with Undo).
 - **Sanity checks:** you can't sell more than you hold, and you can't enter a future date.
 
 ### Update prices
@@ -115,6 +122,10 @@ Three sections, switched at the top.
 ### Investment page
 - **Chart, position details, period gain**, and its **annualized return** (after one year of history).
 - **Buys, sells and dividends on the chart:** ▲ money in (buy, deposit, borrow), ▼ money out (sell, withdrawal, repayment), ● dividend or interest, in a strip under the chart; nearby ones are drawn as a bigger mark. Touch the chart to see the operations of that day ("Buy · 2.5 · 430 € · 12 Mar 2024"); amounts stay hidden when "hide amounts" is on.
+- **Scheduled operations** and, for a loan with its **payment and yearly rate**:
+  - each payment is split into **interest** and **principal** (only the principal lowers the balance; the history shows "500 € + 300 € interest");
+  - this month's interest, the **payoff date**, the interest left to pay and the interest paid so far;
+  - **repay early or invest?** The loan's rate compared with your own annualized return (after a year of history): repaying early is a sure gain, investing earned more or less on average.
 - **Notes:** why you bought it, your plan.
 - **Review date** (in 3 months, 6 months, 1 year…), with a one-tap "Reviewed: next in 6 months".
 - **Full history,** newest first, in the order you entered things. Each price shows whether it was **entered manually** or **fetched online**; linked entries show "⇄ Paid from Livret A". Tap an entry to edit it, or use the trash icon to delete it (with Undo).
