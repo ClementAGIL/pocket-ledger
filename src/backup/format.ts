@@ -3,8 +3,9 @@ import type { Snapshot } from '@/domain/types';
 
 const APP_ID = 'pocket-ledger';
 /** When the format changes, bump it and keep the older versions importable. */
-const FORMAT_VERSION = 8;
-const SUPPORTED_VERSIONS = [8];
+const FORMAT_VERSION = 9;
+/** 9: scheduled operations (`schedules`); 8 has none. */
+const SUPPORTED_VERSIONS = [8, 9];
 
 export interface BackupFile {
   app: typeof APP_ID;
@@ -58,6 +59,7 @@ export function parseBackup(text: string): Snapshot {
   const assets = list(data, 'assets');
   const transactions = list(data, 'transactions');
   const prices = list(data, 'prices');
+  const schedules = json.formatVersion === 8 ? [] : list(data, 'schedules');
 
   const categoryIds = new Set<number>();
   for (const c of categories) {
@@ -98,6 +100,13 @@ export function parseBackup(text: string): Snapshot {
     check(p.source === 'manual' || p.source === 'online', `price source "${String(p.source)}"`);
     check(isStr(p.createdAt), 'price time');
   }
+  for (const x of schedules) {
+    check(isId(x.id) && assetIds.has(x.assetId), 'scheduled operation references an unknown asset');
+    check(['BUY', 'DEPOSIT', 'WITHDRAW'].includes(x.type), `scheduled operation type "${x.type}"`);
+    check(isNum(x.amount) && Number.isInteger(x.day) && x.day >= 1 && x.day <= 31, 'scheduled operation amount and day');
+    check(isISODate(x.startDate) && (x.doneUntil === null || isISODate(x.doneUntil)), 'scheduled operation dates');
+    check(isNumOrNull(x.rate), 'scheduled operation rate');
+  }
 
   return {
     categories: categories.map((c) => ({ ...c, isDefault: !!c.isDefault })) as Snapshot['categories'],
@@ -109,5 +118,10 @@ export function parseBackup(text: string): Snapshot {
       linkedId: t.linkedId !== null && txIds.has(t.linkedId) ? t.linkedId : null,
     })) as Snapshot['transactions'],
     prices: prices as Snapshot['prices'],
+    // Paid from a cash asset that isn't in the file: not tracked.
+    schedules: schedules.map((x) => ({
+      ...x,
+      cashAssetId: isId(x.cashAssetId) && assetIds.has(x.cashAssetId) ? x.cashAssetId : null,
+    })) as Snapshot['schedules'],
   };
 }

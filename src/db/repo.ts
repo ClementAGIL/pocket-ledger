@@ -1,5 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import type { ScheduleInput } from '@/domain/schedules';
 import type {
   Account,
   Asset,
@@ -9,6 +10,7 @@ import type {
   NewTransaction,
   PricePoint,
   PriceSource,
+  Schedule,
   Snapshot,
   Transaction,
   UpdateFrequency,
@@ -79,13 +81,27 @@ const mapPrice = (r: Row): PricePoint => ({
   createdAt: r.created_at ?? null,
 });
 
+const mapSchedule = (r: Row): Schedule => ({
+  id: r.id,
+  assetId: r.asset_id,
+  type: r.type,
+  amount: fromCents(r.amount_cents),
+  day: r.day,
+  startDate: r.start_date,
+  doneUntil: r.done_until ?? null,
+  cashAssetId: r.cash_asset_id ?? null,
+  rate: r.rate ?? null,
+  createdAt: r.created_at ?? null,
+});
+
 export async function loadSnapshot(db: SQLiteDatabase): Promise<Snapshot> {
-  const [categories, accounts, assets, transactions, prices] = await Promise.all([
+  const [categories, accounts, assets, transactions, prices, schedules] = await Promise.all([
     db.getAllAsync<Row>('SELECT * FROM categories ORDER BY sort_order, id'),
     db.getAllAsync<Row>('SELECT * FROM accounts ORDER BY name'),
     db.getAllAsync<Row>('SELECT * FROM assets ORDER BY name'),
     db.getAllAsync<Row>('SELECT * FROM transactions ORDER BY date, id'),
     db.getAllAsync<Row>('SELECT * FROM prices ORDER BY date, id'),
+    db.getAllAsync<Row>('SELECT * FROM schedules ORDER BY id'),
   ]);
   return {
     categories: categories.map(mapCategory),
@@ -93,6 +109,7 @@ export async function loadSnapshot(db: SQLiteDatabase): Promise<Snapshot> {
     assets: assets.map(mapAsset),
     transactions: transactions.map(mapTransaction),
     prices: prices.map(mapPrice),
+    schedules: schedules.map(mapSchedule),
   };
 }
 
@@ -346,6 +363,75 @@ async function insertNewAsset(db: SQLiteDatabase, a: NewAssetSave) {
   return insertAsset(db, { accountId, categoryId, name: a.name, identifier: a.identifier, valuation: a.valuation, note: a.note });
 }
 
+// --- Scheduled operations ---------------------------------------------------
+
+export async function insertSchedule(db: SQLiteDatabase, s: ScheduleInput) {
+  const res = await db.runAsync(
+    'INSERT INTO schedules (asset_id, type, amount_cents, day, start_date, cash_asset_id, rate) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [s.assetId, s.type, toCents(s.amount), s.day, s.startDate, s.cashAssetId, s.rate],
+  );
+  return res.lastInsertRowId;
+}
+
+/** A new start date restarts the schedule from there (nothing before it is proposed any more). */
+export async function updateSchedule(db: SQLiteDatabase, id: number, s: ScheduleInput, restart: boolean) {
+  await db.runAsync(
+    `UPDATE schedules SET type = ?, amount_cents = ?, day = ?, start_date = ?, cash_asset_id = ?, rate = ?${restart ? ', done_until = NULL' : ''}
+     WHERE id = ?`,
+    [s.type, toCents(s.amount), s.day, s.startDate, s.cashAssetId, s.rate, id],
+  );
+}
+
+export async function deleteSchedule(db: SQLiteDatabase, id: number) {
+  await db.runAsync('DELETE FROM schedules WHERE id = ?', [id]);
+}
+
+export async function restoreSchedule(db: SQLiteDatabase, s: Schedule) {
+  await db.runAsync(
+    `INSERT INTO schedules (id, asset_id, type, amount_cents, day, start_date, done_until, cash_asset_id, rate, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
+    [s.id, s.assetId, s.type, toCents(s.amount), s.day, s.startDate, s.doneUntil, s.cashAssetId, s.rate, s.createdAt ?? null],
+  );
+}
+
+/** One reviewed occurrence: saved (`records`) or skipped (null). See `occurrenceRecords` in domain/schedules. */
+export interface ScheduledSave {
+  scheduleId: number;
+  date: ISODate;
+  records: { main: NewTransaction; cash: NewTransaction | null; linked: boolean } | null;
+}
+
+/**
+ * Saves the reviewed occurrences and marks them done (a skipped one too). Returns the ids of the
+ * transactions created, for an undo.
+ */
+export async function saveScheduled(db: SQLiteDatabase, items: ScheduledSave[]): Promise<number[]> {
+  const created: number[] = [];
+  for (const item of items) {
+    if (item.records) {
+      const { main, cash, linked } = item.records;
+      const id = await insertTransaction(db, main);
+      created.push(id);
+      if (cash) {
+        const cashId = await insertTransaction(db, cash);
+        created.push(cashId);
+        if (linked) await linkTransactions(db, id, cashId);
+      }
+    }
+    await db.runAsync(
+      'UPDATE schedules SET done_until = ? WHERE id = ? AND (done_until IS NULL OR done_until < ?)',
+      [item.date, item.scheduleId, item.date],
+    );
+  }
+  return created;
+}
+
+/** Undoes `saveScheduled`: the transactions go, and the occurrences are due again. */
+export async function undoScheduled(db: SQLiteDatabase, transactionIds: number[], doneUntil: Map<number, ISODate | null>) {
+  for (const id of transactionIds) await deleteTransaction(db, id);
+  for (const [id, date] of doneUntil) await db.runAsync('UPDATE schedules SET done_until = ? WHERE id = ?', [date, id]);
+}
+
 // --- Settings ---------------------------------------------------------------
 
 export async function loadSettings(db: SQLiteDatabase): Promise<Record<string, string>> {
@@ -364,7 +450,7 @@ export async function setSetting(db: SQLiteDatabase, key: string, value: string)
 
 export async function clearData(db: SQLiteDatabase) {
   await db.execAsync(
-    'DELETE FROM transactions; DELETE FROM prices; DELETE FROM assets; DELETE FROM accounts; DELETE FROM categories;',
+    'DELETE FROM schedules; DELETE FROM transactions; DELETE FROM prices; DELETE FROM assets; DELETE FROM accounts; DELETE FROM categories;',
   );
 }
 
@@ -391,6 +477,7 @@ export async function replaceAll(db: SQLiteDatabase, s: Snapshot) {
   for (const a of s.assets) await restoreAssetRow(db, a);
   for (const t of s.transactions) await restoreTransaction(db, t);
   for (const p of s.prices) await restorePrice(db, p);
+  for (const x of s.schedules) await restoreSchedule(db, x);
 }
 
 // --- Re-inserting deleted rows with their original id (undo, backup restore) ---
@@ -423,10 +510,19 @@ export async function restorePrice(db: SQLiteDatabase, p: PricePoint) {
 }
 
 /** Undoes `deleteAsset`: the asset comes back with its whole history, under the same ids. */
-export async function restoreAsset(db: SQLiteDatabase, a: Asset, transactions: Transaction[], prices: PricePoint[]) {
+export async function restoreAsset(
+  db: SQLiteDatabase,
+  a: Asset,
+  transactions: Transaction[],
+  prices: PricePoint[],
+  schedules: { own: Schedule[]; paidFrom: number[] } = { own: [], paidFrom: [] },
+) {
   await restoreAssetRow(db, a);
   for (const t of transactions) await restoreTransaction(db, t);
   for (const p of prices) await restorePrice(db, p);
+  // Its scheduled operations, and the other schedules paid from it (`deleteAsset` cleared them).
+  for (const x of schedules.own) await restoreSchedule(db, x);
+  for (const id of schedules.paidFrom) await db.runAsync('UPDATE schedules SET cash_asset_id = ? WHERE id = ?', [a.id, id]);
   // Re-link the cash movements of other investments that `deleteAsset` unlinked.
   for (const t of transactions) {
     if (t.linkedId != null) await db.runAsync('UPDATE transactions SET linked_id = ? WHERE id = ?', [t.id, t.linkedId]);

@@ -81,6 +81,7 @@ describe('investment flows & portfolio returns', () => {
   });
 
   const data: Snapshot = {
+    schedules: [],
     categories: [
       { id: 1, name: 'Cash', kind: 'asset', valuation: 'balance', color: '#000', sortOrder: 0, isDefault: true, targetWeight: null, updateReminder: 'monthly' },
       { id: 2, name: 'Loan', kind: 'liability', valuation: 'balance', color: '#000', sortOrder: 1, isDefault: true, targetWeight: null, updateReminder: 'monthly' },

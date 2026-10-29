@@ -34,6 +34,7 @@ const buy = (assetId: number, date: string, quantity: number, unitPrice: number)
 
 // Intel in two accounts (same ISIN, different case), Apple in one, a savings account with an identifier.
 const data = (): Snapshot => ({
+  schedules: [],
   categories: [
     { id: 1, name: 'Stocks', kind: 'asset', valuation: 'units', color: '#000', sortOrder: 0, isDefault: true, targetWeight: null, updateReminder: 'monthly' },
     { id: 2, name: 'Cash', kind: 'asset', valuation: 'balance', color: '#000', sortOrder: 1, isDefault: true, targetWeight: null, updateReminder: 'monthly' },

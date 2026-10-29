@@ -62,7 +62,10 @@ export function EntryLine({
         ? `${formatNumber(t.quantity)} × ${money(t.unitPrice ?? 0)}${t.fees ? ` + ${money(t.fees)} fees` : ''}`
         : isCharge(t)
           ? `−${money(t.fees - t.amount)}`
-          : `${money(t.amount)}${t.fees ? ` − ${money(t.fees)} fees` : ''}`;
+          : isLiability && t.type === 'WITHDRAW' && t.fees
+            ? // A loan payment: the repayment's fees are its interest.
+              `${money(t.amount)} + ${money(t.fees)} interest`
+            : `${money(t.amount)}${t.fees ? ` − ${money(t.fees)} fees` : ''}`;
   }
   return (
     <View style={{ flex: 1, gap: 2 }}>

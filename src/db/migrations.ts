@@ -87,6 +87,26 @@ const MIGRATIONS: ((db: SQLiteDatabase) => Promise<void>)[] = [
     `);
     await seedDefaultCategories(db);
   },
+  // 2: scheduled operations (monthly buys, deposits, loan payments), confirmed by the user when due.
+  async (db) => {
+    await db.execAsync(`
+      CREATE TABLE schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        type TEXT NOT NULL CHECK (type IN ('BUY', 'DEPOSIT', 'WITHDRAW')),
+        amount_cents INTEGER NOT NULL,
+        day INTEGER NOT NULL CHECK (day BETWEEN 1 AND 31),
+        start_date TEXT NOT NULL,
+        -- Occurrences up to this date are confirmed or skipped.
+        done_until TEXT,
+        cash_asset_id INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+        -- Loans: yearly interest rate (0.035 = 3.5%).
+        rate REAL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_schedules_asset ON schedules(asset_id);
+    `);
+  },
 ];
 
 /** The default categories, with their reminder frequency (e.g. Real estate → never). */
@@ -101,7 +121,7 @@ export async function seedDefaultCategories(db: SQLiteDatabase) {
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
-const TABLES = ['prices', 'transactions', 'assets', 'accounts', 'categories', 'settings'];
+const TABLES = ['schedules', 'prices', 'transactions', 'assets', 'accounts', 'categories', 'settings'];
 
 export async function migrate(db: SQLiteDatabase, { isDev = __DEV__ }: { isDev?: boolean } = {}) {
   await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');

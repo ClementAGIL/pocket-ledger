@@ -107,6 +107,7 @@ describe('assetPerformance', () => {
 
 describe('buildPerformance', () => {
   const data: Snapshot = {
+    schedules: [],
     categories: [
       { id: 1, name: 'Cash', kind: 'asset', valuation: 'balance', color: '#000', sortOrder: 0, isDefault: true, targetWeight: null, updateReminder: 'monthly' },
       { id: 2, name: 'Loan', kind: 'liability', valuation: 'balance', color: '#000', sortOrder: 1, isDefault: true, targetWeight: null, updateReminder: 'monthly' },
@@ -163,6 +164,7 @@ describe('dividends paid into a cash account', () => {
   });
   // 1000 € put into the cash account, 900 € of shares bought from it, a 20 € dividend paid into it.
   const data: Snapshot = {
+    schedules: [],
     categories: [cat(1, 'ETF', 'units'), cat(2, 'Cash', 'balance')],
     accounts: [{ id: 1, name: 'Broker', institution: null, note: null, archived: false, createdAt: '' }],
     assets: [asset(1, 1, 'units'), asset(2, 2, 'balance')],
@@ -236,6 +238,7 @@ describe('groupByAccount', () => {
   const asset = (id: number, accountId: number, categoryId: number) =>
     ({ id, accountId, categoryId, name: `A${id}`, identifier: null, valuation: 'balance', note: null, reviewDate: null, archived: false, createdAt: '' }) as const;
   const data: Snapshot = {
+    schedules: [],
     categories: [cat(1, 'Cash'), cat(2, 'Stock'), cat(3, 'Loan', 'liability')],
     accounts: [account(1, 'Bank'), account(2, 'Broker')],
     assets: [asset(1, 1, 1), asset(2, 2, 1), asset(3, 2, 2), asset(4, 1, 3)],

@@ -1,4 +1,4 @@
-import { migrate } from '../migrations';
+import { migrate, SCHEMA_VERSION } from '../migrations';
 import { openTestDatabase } from '../nodeTestDatabase';
 import * as repo from '../repo';
 
@@ -64,6 +64,6 @@ describe('database version newer than the app', () => {
     const snapshot = await repo.loadSnapshot(db);
     expect(snapshot.accounts).toEqual([]);
     expect(snapshot.categories.find((c) => c.name === 'Real estate')!.updateReminder).toBe('never');
-    expect((await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))!.user_version).toBe(1);
+    expect((await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))!.user_version).toBe(SCHEMA_VERSION);
   });
 });

@@ -3,6 +3,7 @@ import { buildPortfolio } from '../portfolio';
 import type { Snapshot } from '../types';
 
 const base = (): Snapshot => ({
+  schedules: [],
   categories: [
     { id: 1, name: 'ETF', kind: 'asset', valuation: 'units', color: '#000', sortOrder: 0, isDefault: true, targetWeight: null, updateReminder: 'monthly' },
     { id: 2, name: 'Cash', kind: 'asset', valuation: 'balance', color: '#000', sortOrder: 1, isDefault: true, targetWeight: null, updateReminder: 'monthly' },

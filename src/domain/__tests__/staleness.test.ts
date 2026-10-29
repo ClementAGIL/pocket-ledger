@@ -48,6 +48,7 @@ describe('stalenessOf', () => {
 describe('summarizeStaleness', () => {
   it('counts open positions only and finds the worst level', () => {
     const data: Snapshot = {
+      schedules: [],
       categories: [{ id: 1, name: 'ETF', kind: 'asset', valuation: 'units', color: '#000', sortOrder: 0, isDefault: true, targetWeight: null, updateReminder: 'monthly' }],
       accounts: [{ id: 1, name: 'Broker', institution: null, note: null, archived: false, createdAt: '' }],
       assets: [1, 2, 3, 4].map((id) => ({

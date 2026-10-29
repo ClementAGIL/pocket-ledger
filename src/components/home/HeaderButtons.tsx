@@ -12,20 +12,24 @@ import { useTheme } from '@/theme';
 export function ReminderButton({
   summary,
   reviews,
+  scheduled,
   setup,
   onPress,
 }: {
   summary: StalenessSummary;
   reviews: number;
+  /** Scheduled operations due. */
+  scheduled: number;
   /** Goal / emergency fund not set yet. */
   setup: number;
   onPress: () => void;
 }) {
   const theme = useTheme();
-  const count = summary.stale + reviews + setup;
+  const count = summary.stale + reviews + scheduled + setup;
   const label = [
     summary.stale > 0 && `${summary.stale} ${summary.stale > 1 ? 'prices need' : 'price needs'} an update`,
     reviews > 0 && `${reviews} ${reviews > 1 ? 'reviews' : 'review'} due`,
+    scheduled > 0 && `${scheduled} scheduled ${scheduled > 1 ? 'operations' : 'operation'} due`,
     setup > 0 && 'plan to set up',
   ]
     .filter(Boolean)
@@ -41,6 +45,8 @@ export function ReminderButton({
         <StalenessIcon level={summary.worst} size={22} />
       ) : reviews > 0 ? (
         <Ionicons name="flag" size={20} color={theme.staleWarning} />
+      ) : scheduled > 0 ? (
+        <Ionicons name="repeat" size={21} color={theme.primary} />
       ) : (
         <Ionicons name="compass-outline" size={21} color={theme.primary} />
       )}

@@ -93,10 +93,36 @@ export interface PricePoint {
   createdAt?: string | null;
 }
 
+/**
+ * A recurring operation, confirmed by the user each time it's due (nothing is added on its own):
+ * - BUY (units): invest `amount` € at the price of the day;
+ * - DEPOSIT / WITHDRAW (balance): put in / take out `amount` €;
+ * - on a loan, WITHDRAW = the monthly payment: with `rate`, the interest (balance × rate / 12) is
+ *   saved as the repayment's `fees` and only the rest (the principal) lowers the balance.
+ */
+export interface Schedule {
+  id: number;
+  assetId: number;
+  type: 'BUY' | 'DEPOSIT' | 'WITHDRAW';
+  amount: number;
+  /** Day of the month (1–31, clamped to the month's last day). */
+  day: number;
+  /** First occurrence on or after this date. */
+  startDate: ISODate;
+  /** Occurrences up to this date are done (confirmed or skipped); null = none yet. */
+  doneUntil: ISODate | null;
+  /** Cash asset it's paid from (or, for a WITHDRAW of a balance asset, paid into); null = not tracked. */
+  cashAssetId: number | null;
+  /** Loans: yearly interest rate (0.035 = 3.5%); null = not set. */
+  rate: number | null;
+  createdAt?: string | null;
+}
+
 export interface Snapshot {
   categories: Category[];
   accounts: Account[];
   assets: Asset[];
   transactions: Transaction[];
   prices: PricePoint[];
+  schedules: Schedule[];
 }

@@ -3,6 +3,9 @@ import type { Snapshot } from '@/domain/types';
 import { parseBackup, serializeBackup } from '../format';
 
 const snapshot: Snapshot = {
+  schedules: [
+    { id: 1, assetId: 1, type: 'BUY', amount: 200, day: 5, startDate: '2024-03-01', doneUntil: '2024-03-05', cashAssetId: null, rate: null, createdAt: '2024-03-01 09:00:00' },
+  ],
   categories: [{ id: 1, name: 'ETF', kind: 'asset', valuation: 'units', color: '#000', sortOrder: 0, isDefault: true, targetWeight: null, updateReminder: 'monthly' }],
   accounts: [{ id: 1, name: 'Broker', institution: null, note: null, archived: false, createdAt: '2024-01-01 00:00:00' }],
   assets: [
@@ -29,6 +32,19 @@ describe('backup format', () => {
     const noSource = JSON.parse(serializeBackup(snapshot));
     delete noSource.data.prices[0].source;
     expect(() => parseBackup(JSON.stringify(noSource))).toThrow();
+  });
+
+  it('reads version 8 files, which have no scheduled operations', () => {
+    const v8 = JSON.parse(serializeBackup(snapshot));
+    v8.formatVersion = 8;
+    delete v8.data.schedules;
+    expect(parseBackup(JSON.stringify(v8)).schedules).toEqual([]);
+  });
+
+  it('forgets a missing paid-from cash asset of a scheduled operation', () => {
+    const file = JSON.parse(serializeBackup(snapshot));
+    file.data.schedules[0].cashAssetId = 99;
+    expect(parseBackup(JSON.stringify(file)).schedules[0].cashAssetId).toBeNull();
   });
 
   it('rejects files that are not Pocket Ledger backups', () => {

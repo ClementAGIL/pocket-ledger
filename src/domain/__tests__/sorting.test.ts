@@ -31,6 +31,7 @@ const deposit = (id: number, assetId: number, amount: number): Transaction => ({
 // ETF:  C (invested 100, worth 300 → +200, +200%)
 // Loan: D
 const data: Snapshot = {
+  schedules: [],
   categories: [
     { id: 1, name: 'Cash', kind: 'asset', valuation: 'balance', color: '#000', sortOrder: 0, isDefault: true, targetWeight: null, updateReminder: 'monthly' },
     { id: 2, name: 'ETF', kind: 'asset', valuation: 'balance', color: '#000', sortOrder: 1, isDefault: true, targetWeight: null, updateReminder: 'monthly' },

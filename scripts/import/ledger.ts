@@ -71,7 +71,7 @@ export function emptySnapshot(): Snapshot {
     targetWeight: null,
     updateReminder: c.name === 'Real estate' ? 'never' : 'monthly',
   }));
-  return { categories, accounts: [], assets: [], transactions: [], prices: [] };
+  return { categories, accounts: [], assets: [], transactions: [], prices: [], schedules: [] };
 }
 
 const nextId = (rows: { id: number }[]) => rows.reduce((max, r) => Math.max(max, r.id), 0) + 1;
@@ -90,6 +90,7 @@ export function mergeAccount(base: Snapshot | null, imported: ImportedAccount, n
     assets: [...source.assets],
     transactions: [...source.transactions],
     prices: [...source.prices],
+    schedules: [...source.schedules],
   };
   const stamp = now.toISOString().slice(0, 19).replace('T', ' ');
 
@@ -103,6 +104,10 @@ export function mergeAccount(base: Snapshot | null, imported: ImportedAccount, n
     replaced = { assets: oldAssets.size, transactions: oldTx.size };
     snapshot.assets = snapshot.assets.filter((a) => !oldAssets.has(a.id));
     snapshot.prices = snapshot.prices.filter((p) => !oldAssets.has(p.assetId));
+    // Scheduled operations go with their investment; paid from a replaced cash asset: not tracked.
+    snapshot.schedules = snapshot.schedules
+      .filter((x) => !oldAssets.has(x.assetId))
+      .map((x) => (x.cashAssetId != null && oldAssets.has(x.cashAssetId) ? { ...x, cashAssetId: null } : x));
     // A transfer from another account to a replaced one loses its link, not its entry.
     snapshot.transactions = snapshot.transactions
       .filter((t) => !oldTx.has(t.id))
