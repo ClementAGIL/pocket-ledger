@@ -40,6 +40,12 @@ export default function SettingsScreen() {
       </Card>
 
       {!isDemo && <BackupSection />}
+
+      <SectionTitle>Help</SectionTitle>
+      <Card style={settingsStyles.card}>
+        <LinkRow icon="sparkles-outline" label="Show the introduction" onPress={() => router.push('/onboarding')} />
+      </Card>
+
       {__DEV__ && <DevSection />}
       {isDemo && <DemoSection />}
     </ScrollView>
